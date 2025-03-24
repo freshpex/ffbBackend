@@ -71,7 +71,7 @@ app.use('/api/admin', verifyToken, adminRoutes);
 app.use('/api/trading', verifyToken, tradingRoutes);
 
 // Health check endpoint
-app.get('/api/health', (req, res) => {
+app.get('/', (req, res) => {
   const healthStatus = {
     status: 'OK',
     timestamp: new Date(),

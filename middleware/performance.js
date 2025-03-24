@@ -33,29 +33,24 @@ export const performanceMonitor = (req, res, next) => {
   next();
 };
 
-// Memory usage monitor
+// Modify the memory monitoring to run less frequently
 export const memoryMonitor = (req, res, next) => {
-  const memoryUsage = process.memoryUsage();
-  const threshold = 0.8;
-  
-  const memoryUsageInMB = {
-    rss: (memoryUsage.rss / 1024 / 1024).toFixed(2),
-    heapTotal: (memoryUsage.heapTotal / 1024 / 1024).toFixed(2),
-    heapUsed: (memoryUsage.heapUsed / 1024 / 1024).toFixed(2),
-    external: (memoryUsage.external / 1024 / 1024).toFixed(2),
-  };
-  
-  // Check if memory usage is above threshold then force garbage collection
-  if (memoryUsage.heapUsed / memoryUsage.heapTotal > threshold) {
-    logger.warn('High memory usage detected', { memoryUsage: memoryUsageInMB });
+  // Only run monitoring on a sample of requests (e.g., 10%)
+  if (Math.random() < 0.1) {
+    const memoryUsage = process.memoryUsage();
     
-    if (memoryUsage.heapUsed / memoryUsage.heapTotal > 0.9 && global.gc) {
-      logger.warn('Attempting to force garbage collection');
-      try {
-        global.gc();
-      } catch (e) {
-        logger.error('Failed to force garbage collection', { error: e.message });
-      }
+    // Check if memory usage is high
+    if (memoryUsage.heapUsed / memoryUsage.heapTotal > 0.85 || 
+        memoryUsage.rss > 100 * 1024 * 1024) { // 100MB threshold
+      logger.warn('High memory usage detected', {
+        service: 'broker-api',
+        memoryUsage: {
+          rss: (memoryUsage.rss / (1024 * 1024)).toFixed(2),
+          heapTotal: (memoryUsage.heapTotal / (1024 * 1024)).toFixed(2),
+          heapUsed: (memoryUsage.heapUsed / (1024 * 1024)).toFixed(2),
+          external: (memoryUsage.external / (1024 * 1024)).toFixed(2),
+        },
+      });
     }
   }
   

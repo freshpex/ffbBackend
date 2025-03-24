@@ -1,14 +1,8 @@
 import winston from 'winston';
-import 'winston-daily-rotate-file';
-import path from 'path';
-import fs from 'fs';
 import util from 'util';
 
-// Ensure logs directory exists
-const logDir = path.join(process.cwd(), 'logs');
-if (!fs.existsSync(logDir)) {
-  fs.mkdirSync(logDir, { recursive: true });
-}
+// Define log formats
+const { combine, timestamp, printf, colorize, json, errors } = winston.format;
 
 // Safe stringify function to handle circular references
 const safeStringify = (obj, replacer = null, spaces = 2, cycleReplacer = null) => {
@@ -20,9 +14,7 @@ const safeStringify = (obj, replacer = null, spaces = 2, cycleReplacer = null) =
       if (value instanceof Error) {
         return {
           message: value.message,
-          name: value.name,
-          stack: value.stack,
-          ...(value.code && { code: value.code })
+          stack: process.env.NODE_ENV === 'production' ? undefined : value.stack
         };
       }
       
@@ -38,86 +30,33 @@ const safeStringify = (obj, replacer = null, spaces = 2, cycleReplacer = null) =
   );
 };
 
-// Define log formats
-const { combine, timestamp, printf, colorize, json } = winston.format;
-
-// Custom format for console output
-const consoleFormat = combine(
+// Create development format (more human-readable)
+const developmentFormat = combine(
+  errors({ stack: true }),
   colorize(),
-  timestamp(),
-  printf(info => {
-    const { level, message, timestamp, ...meta } = info;
-    
-    // Handle metadata safely
-    let metaString = '';
-    if (Object.keys(meta).length > 0) {
-      try {
-        metaString = Object.keys(meta).length ? ` ${safeStringify(meta)}` : '';
-      } catch (error) {
-        metaString = ' [Metadata Stringification Error]';
-      }
-    }
-    
-    return `${timestamp} [${level}]: ${message}${metaString}`;
+  timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+  printf(({ level, message, timestamp, ...meta }) => {
+    const metaStr = Object.keys(meta).length ? 
+      `\n${util.inspect(meta, { colors: true, depth: 5 })}` : '';
+    return `${timestamp} ${level}: ${message}${metaStr}`;
   })
 );
 
-// Custom format for file output
-const fileFormat = combine(
+// Create production format (structured JSON for cloud logging)
+const productionFormat = combine(
+  errors({ stack: true }),
   timestamp(),
-  winston.format(info => {
-    // Clone info to avoid modifying the original object
-    const formattedInfo = { ...info };
-    
-    // Safely handle any potentially circular structures
-    Object.keys(formattedInfo).forEach(key => {
-      if (typeof formattedInfo[key] === 'object' && formattedInfo[key] !== null) {
-        try {
-          // Test if the object can be stringified normally
-          JSON.stringify(formattedInfo[key]);
-        } catch (error) {
-          // If stringification fails, replace with safe version
-          if (error.message.includes('circular')) {
-            formattedInfo[key] = JSON.parse(
-              safeStringify(formattedInfo[key], null, 2, () => '[Circular]')
-            );
-          }
-        }
-      }
-    });
-    
-    return formattedInfo;
-  })(),
   json()
 );
 
-// Create the logger instance
+// Create the logger instance with console-only transport
 const logger = winston.createLogger({
-  level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
-  format: fileFormat,
+  level: process.env.LOG_LEVEL || (process.env.NODE_ENV === 'production' ? 'info' : 'debug'),
+  format: process.env.NODE_ENV === 'production' ? productionFormat : developmentFormat,
   defaultMeta: { service: 'broker-api' },
   transports: [
-    // Console transport
-    new winston.transports.Console({
-      format: consoleFormat
-    }),
-    
-    // Rotating file transport for all logs
-    new winston.transports.DailyRotateFile({
-      filename: path.join(logDir, 'application-%DATE%.log'),
-      datePattern: 'YYYY-MM-DD',
-      maxSize: '20m',
-      maxFiles: '14d'
-    }),
-    
-    // Separate file for errors only
-    new winston.transports.DailyRotateFile({
-      filename: path.join(logDir, 'error-%DATE%.log'),
-      datePattern: 'YYYY-MM-DD',
-      maxSize: '20m',
-      maxFiles: '14d',
-      level: 'error'
-    })
+    // Console transport only
+    new winston.transports.Console()
   ]
 });
 

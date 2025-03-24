@@ -7,18 +7,21 @@ import Transaction from '../models/Transaction.js';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import { ensureUploadDir } from '../utils/fileHandler.js';
 
 const router = express.Router();
 
-// Configure multer for file uploads
-const uploadsDir = path.join(process.cwd(), 'uploads/kyc');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
+// Initialize upload directory safely based on environment
+const uploadDir = process.env.NODE_ENV === 'production' 
+  ? '/tmp/uploads/kyc'
+  : './tmp/uploads/kyc';    // Use local directory in development
+
+// Ensure the directory exists
+ensureUploadDir(uploadDir);
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, uploadsDir);
+    cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
     cb(null, `${req.user.userId}-${Date.now()}${path.extname(file.originalname)}`);
