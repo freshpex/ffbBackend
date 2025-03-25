@@ -60,9 +60,27 @@ const logger = winston.createLogger({
   ]
 });
 
+// ANSI color codes for colored console output
+const colors = {
+  reset: "\x1b[0m",
+  red: "\x1b[31m",
+  green: "\x1b[32m",
+  yellow: "\x1b[33m",
+  blue: "\x1b[34m",
+  magenta: "\x1b[35m",
+  cyan: "\x1b[36m",
+  white: "\x1b[37m"
+};
+
 // Create HTTP request logger middleware with safe object handling
 export const requestLogger = (req, res, next) => {
   const start = Date.now();
+  
+  // Add bold, colored console log for IMMEDIATE visibility in terminal
+  console.log(`${colors.cyan}┌─────────────────────────────────────────┐${colors.reset}`);
+  console.log(`${colors.cyan}│ 🔄 REQUEST: ${colors.green}${req.method}${colors.reset} ${req.originalUrl}`);
+  console.log(`${colors.cyan}│ ${colors.yellow}${new Date().toISOString()}${colors.reset}`);
+  console.log(`${colors.cyan}└─────────────────────────────────────────┘${colors.reset}`);
   
   // Prepare safe request info for logging
   const safeReq = {
@@ -109,6 +127,18 @@ export const requestLogger = (req, res, next) => {
       logObject.userId = req.user.userId;
     }
     
+    // Choose color based on status code
+    let statusColor = colors.green; // 2xx
+    if (res.statusCode >= 500) statusColor = colors.red; // 5xx
+    else if (res.statusCode >= 400) statusColor = colors.yellow; // 4xx
+    else if (res.statusCode >= 300) statusColor = colors.cyan; // 3xx
+    
+    // Log response with color-coded status
+    console.log(`${colors.magenta}┌─────────────────────────────────────────┐${colors.reset}`);
+    console.log(`${colors.magenta}│ 📤 RESPONSE: ${colors.green}${req.method}${colors.reset} ${req.originalUrl}`);
+    console.log(`${colors.magenta}│ ${statusColor}${res.statusCode}${colors.reset} completed in ${colors.yellow}${duration}ms${colors.reset}`);
+    console.log(`${colors.magenta}└─────────────────────────────────────────┘${colors.reset}`);
+    
     // Choose log level based on status code
     if (res.statusCode >= 500) {
       logger.error('Server Error', logObject);
@@ -133,6 +163,12 @@ export const errorLogger = (err, req, res, next) => {
     path: req.originalUrl,
     method: req.method
   };
+  
+  // Add colored console log for errors
+  console.log(`${colors.red}┌─────────────────────────────────────────┐${colors.reset}`);
+  console.log(`${colors.red}│ 🔥 ERROR: ${err.message}`);
+  console.log(`${colors.red}│ ${req.method} ${req.originalUrl}`);
+  console.log(`${colors.red}└─────────────────────────────────────────┘${colors.reset}`);
   
   logger.error('Uncaught Exception', safeError);
   next(err);

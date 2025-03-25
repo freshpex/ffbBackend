@@ -1,4 +1,5 @@
 import http from 'http';
+import mongoose from 'mongoose'; // Add missing mongoose import
 import { Server } from 'socket.io';
 import config from './config/config.js';
 import logger from './middleware/logger.js';
@@ -16,18 +17,12 @@ async function startServer() {
     await connectDatabase();
     
     // Setup WebSockets
-    const io = new Server(server, {
-      cors: {
-        origin: config.cors.origin,
-        methods: ['GET', 'POST']
-      }
-    });
-    setupWebSockets(io);
+    setupWebSockets(server);
     
-    // Start listening
-    const PORT = config.app.port;
+    // Start listening - Fix port configuration path
+    const PORT = config.server.port;
     server.listen(PORT, () => {
-      logger.info(`Server running in ${config.app.env} mode on port ${PORT}`);
+      logger.info(`Server running in ${config.server.env} mode on port ${PORT}`);
     });
     
     // Handle server errors

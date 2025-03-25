@@ -1,158 +1,231 @@
 import mongoose from 'mongoose';
+import bcrypt from 'bcrypt';
+import crypto from 'crypto';
 
-const UserSchema = new mongoose.Schema(
-  {
-    uid: {
-      type: String,
-      required: true,
-      unique: true,
-    },
-    email: {
-      type: String,
-      required: true,
-      unique: true,
-      lowercase: true,
-    },
-    firstName: {
-      type: String,
-      required: true,
-    },
-    lastName: {
-      type: String,
-      required: true,
-    },
-    role: {
-      type: String,
-      enum: ['user', 'admin', 'superadmin'],
-      default: 'user',
-    },
-    balance: {
-      type: Number,
-      default: 0,
-    },
-    kycVerified: {
-      type: Boolean,
-      default: false,
-    },
-    kycDocuments: {
-      idCard: {
-        url: String,
-        verified: { type: Boolean, default: false },
-      },
-      proofOfAddress: {
-        url: String,
-        verified: { type: Boolean, default: false },
-      },
-    },
-    referralCode: {
-      type: String,
-      unique: true,
-      sparse: true,
-    },
-    referredBy: {
-      type: String,
-      default: null,
-    },
-    referralEarnings: {
-      type: Number,
-      default: 0,
-    },
-    totalDeposited: {
-      type: Number,
-      default: 0,
-    },
-    totalWithdrawn: {
-      type: Number,
-      default: 0,
-    },
-    tradingEnabled: {
-      type: Boolean,
-      default: true,
-    },
-    apiKeys: [
-      {
-        name: String,
-        key: String,
-        secret: String,
-        permissions: [String],
-        active: Boolean,
-      },
-    ],
-    settings: {
-      emailNotifications: {
-        type: Boolean,
-        default: true,
-      },
-      twoFactorAuth: {
-        type: Boolean,
-        default: false,
-      },
-    },
+const apiKeySchema = new mongoose.Schema({
+  key: {
+    type: String,
+    required: true
   },
-  { timestamps: true }
-);
-
-// Static method to synchronize Firebase user
-UserSchema.statics.syncFirebaseUser = async function(uid, email, displayName = '') {
-  try {
-    // Find user by uid or email
-    let user = await this.findOne({ $or: [{ uid }, { email }] });
-    
-    if (user) {
-      // User exists - update if needed
-      let updates = {};
-      
-      // If found by email but uid doesn't match, update uid
-      if (user.uid !== uid) {
-        updates.uid = uid;
-      }
-      
-      // If displayName is provided, parse it
-      if (displayName && displayName.includes(' ')) {
-        const [firstName, ...lastNameParts] = displayName.split(' ');
-        const lastName = lastNameParts.join(' ');
-        
-        if (user.firstName !== firstName) updates.firstName = firstName;
-        if (user.lastName !== lastName) updates.lastName = lastName;
-      }
-      
-      // If there are updates, apply them
-      if (Object.keys(updates).length > 0) {
-        Object.assign(user, updates);
-        await user.save();
-      }
-      
-      return { user, isNew: false, updated: Object.keys(updates).length > 0 };
-    }
-    
-    // User not found, create new user
-    let firstName = 'User';
-    let lastName = '';
-    
-    if (displayName && displayName.includes(' ')) {
-      const nameParts = displayName.split(' ');
-      firstName = nameParts[0];
-      lastName = nameParts.slice(1).join(' ');
-    }
-    
-    // Generate referral code
-    const referralCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-    
-    // Create new user
-    const newUser = new this({
-      uid,
-      email,
-      firstName,
-      lastName,
-      referralCode
-    });
-    
-    await newUser.save();
-    
-    return { user: newUser, isNew: true, updated: false };
-  } catch (error) {
-    throw error;
+  secret: {
+    type: String,
+    required: true
+  },
+  name: {
+    type: String,
+    required: true
+  },
+  active: {
+    type: Boolean,
+    default: true
+  },
+  permissions: [{
+    type: String,
+    enum: ['read', 'trade', 'withdraw']
+  }],
+  allowedIPs: [{
+    type: String
+  }],
+  createdAt: {
+    type: Date,
+    default: Date.now
+  },
+  lastUsed: {
+    type: Date
   }
+});
+
+const kycDocumentSchema = new mongoose.Schema({
+  url: {
+    type: String,
+    required: true
+  },
+  verified: {
+    type: Boolean,
+    default: false
+  },
+  uploadedAt: {
+    type: Date,
+    default: Date.now
+  }
+});
+
+const userSchema = new mongoose.Schema({
+  email: {
+    type: String,
+    required: true,
+    unique: true,
+    trim: true,
+    lowercase: true
+  },
+  password: {
+    type: String,
+    required: true
+  },
+  firstName: {
+    type: String,
+    trim: true
+  },
+  lastName: {
+    type: String,
+    trim: true
+  },
+  role: {
+    type: String,
+    enum: ['user', 'admin', 'superadmin'],
+    default: 'user'
+  },
+  status: {
+    type: String,
+    enum: ['active', 'inactive', 'suspended'],
+    default: 'active'
+  },
+  balance: {
+    type: Number,
+    default: 0
+  },
+  kycVerified: {
+    type: Boolean,
+    default: false
+  },
+  kycStatus: {
+    type: String,
+    enum: ['pending', 'approved', 'rejected', 'not_submitted'],
+    default: 'not_submitted'
+  },
+  kycNotes: {
+    type: String
+  },
+  kycVerifiedAt: {
+    type: Date
+  },
+  kycVerifiedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  kycDocuments: {
+    idCard: kycDocumentSchema,
+    proofOfAddress: kycDocumentSchema
+  },
+  phone: {
+    type: String
+  },
+  country: {
+    type: String
+  },
+  tradingEnabled: {
+    type: Boolean,
+    default: true
+  },
+  referralCode: {
+    type: String,
+    unique: true,
+    sparse: true
+  },
+  referredBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  loginAttempts: {
+    type: Number,
+    default: 0
+  },
+  lastLoginAt: {
+    type: Date
+  },
+  passwordResetToken: String,
+  passwordResetExpires: Date,
+  apiKeys: [apiKeySchema],
+  settings: {
+    theme: {
+      type: String,
+      default: 'light'
+    },
+    notifications: {
+      email: {
+        type: Boolean,
+        default: true
+      },
+      app: {
+        type: Boolean,
+        default: true
+      }
+    },
+    twoFactorEnabled: {
+      type: Boolean,
+      default: false
+    }
+  }
+}, {
+  timestamps: true
+});
+
+// Hash password before saving
+userSchema.pre('save', async function(next) {
+  const user = this;
+  
+  // Only hash if password is modified or new
+  if (!user.isModified('password')) return next();
+  
+  try {
+    const salt = await bcrypt.genSalt(10);
+    user.password = await bcrypt.hash(user.password, salt);
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Generate referral code if not set
+userSchema.pre('save', function(next) {
+  const user = this;
+  
+  if (!user.referralCode) {
+    // Generate a unique code based on user ID and timestamp
+    const baseCode = user._id.toString().slice(-6).toUpperCase();
+    user.referralCode = `${baseCode}${Math.floor(Math.random() * 1000)}`;
+  }
+  
+  next();
+});
+
+// Compare password method
+userSchema.methods.comparePassword = async function(candidatePassword) {
+  return bcrypt.compare(candidatePassword, this.password);
 };
 
-export default mongoose.model('User', UserSchema);
+// Generate API key pair
+userSchema.methods.generateApiKey = function(name, permissions = ['read']) {
+  const key = crypto.randomBytes(16).toString('hex');
+  const secret = crypto.randomBytes(32).toString('hex');
+  
+  this.apiKeys.push({
+    key,
+    secret,
+    name,
+    permissions,
+    active: true,
+    createdAt: new Date()
+  });
+  
+  return { key, secret };
+};
+
+// Generate password reset token
+userSchema.methods.createPasswordResetToken = function() {
+  const resetToken = crypto.randomBytes(32).toString('hex');
+  
+  this.passwordResetToken = crypto
+    .createHash('sha256')
+    .update(resetToken)
+    .digest('hex');
+  
+  // Token expires in 1 hour
+  this.passwordResetExpires = Date.now() + 3600000;
+  
+  return resetToken;
+};
+
+const User = mongoose.model('User', userSchema);
+
+export default User;
