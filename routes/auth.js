@@ -88,17 +88,23 @@ router.post('/sync', async (req, res) => {
   try {
     const { uid, email, displayName, firebaseToken } = req.body;
     
+    logger.info(`User sync request: ${email} | Firebase UID: ${uid.substring(0, 8)}...`);
+    
     if (!uid || !email) {
+      logger.warn(`Sync failed: Missing required user information | Email: ${email || 'not provided'}`);
       return res.status(400).json({ message: 'Missing required user information' });
     }
-    
-    // No token verification is needed here as we trust the Firebase token
-    // and are only using the data to create/update a user
     
     // Find user by uid or email with error handling
     let user;
     try {
       user = await User.findOne({ $or: [{ uid }, { email }] });
+      
+      if (user) {
+        logger.info(`User found for sync: ${email} | MongoDB ID: ${user._id}`);
+      } else {
+        logger.info(`User not found for sync, will create new user: ${email}`);
+      }
     } catch (dbError) {
       logger.error('Database error during user lookup:', dbError);
       return res.status(500).json({ message: 'Database error during synchronization' });

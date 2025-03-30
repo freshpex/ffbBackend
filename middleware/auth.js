@@ -12,23 +12,46 @@ const extractToken = (req) => {
 
 // Verify JWT token middleware
 export const verifyToken = async (req, res, next) => {
+  const requestId = req.requestId || 'unknown';
   try {
     const token = extractToken(req);
     
     if (!token) {
+      logger.warn(`[${requestId}] Authentication failed: No token provided | IP: ${req.ip} | Path: ${req.originalUrl}`);
       return res.status(401).json({ 
         success: false, 
         message: 'Access denied. No token provided.' 
       });
     }
     
+    logger.debug(`[${requestId}] Processing token verification for ${req.method} request to ${req.originalUrl}`);
+    
     try {
       // Verify the token
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       
+      // Add detailed logging for debugging
+      logger.info(`[${requestId}] User authenticated: ${decoded.email} | Role: ${decoded.role} | Method: ${req.method} | Path: ${req.originalUrl}`);
+      
+      // Log request body for non-GET requests (after authentication)
+      if (req.method !== 'GET' && req.method !== 'HEAD' && req.body) {
+        const safeBody = { ...req.body };
+        // Redact sensitive fields
+        if (safeBody.password) safeBody.password = '[REDACTED]';
+        if (safeBody.token) safeBody.token = '[REDACTED]';
+        if (safeBody.firebaseToken) safeBody.firebaseToken = '[REDACTED]';
+        
+        logger.debug(`[${requestId}] Authenticated request body:`, { 
+          body: safeBody,
+          user: decoded.email,
+          method: req.method
+        });
+      }
+      
       // Check token expiration time
       const currentTimestamp = Math.floor(Date.now() / 1000);
       if (decoded.exp <= currentTimestamp) {
+        logger.warn(`[${requestId}] Token expired for user ${decoded.email}`);
         return res.status(401).json({ 
           success: false, 
           message: 'Token expired. Please log in again.' 
@@ -40,6 +63,7 @@ export const verifyToken = async (req, res, next) => {
       
       // If token is close to expiring (less than 10 minutes), issue a new one
       if (decoded.exp - currentTimestamp < 600) {
+        logger.debug(`[${requestId}] Generating new token for user ${decoded.email} (token close to expiry)`);
         const user = await User.findById(decoded.userId);
         if (user) {
           const newToken = jwt.sign(
@@ -56,25 +80,27 @@ export const verifyToken = async (req, res, next) => {
       next();
     } catch (error) {
       if (error.name === 'JsonWebTokenError') {
+        logger.warn(`[${requestId}] Invalid token error | IP: ${req.ip} | Path: ${req.originalUrl} | Error: ${error.message}`);
         return res.status(401).json({ 
           success: false, 
           message: 'Invalid token. Please log in again.' 
         });
       } else if (error.name === 'TokenExpiredError') {
+        logger.warn(`[${requestId}] Token expired error | IP: ${req.ip} | Path: ${req.originalUrl}`);
         return res.status(401).json({ 
           success: false, 
           message: 'Token expired. Please log in again.' 
         });
       }
       
-      logger.error('Auth middleware error:', error);
+      logger.error(`[${requestId}] Auth middleware error:`, error);
       return res.status(500).json({ 
         success: false, 
         message: 'Authentication error' 
       });
     }
   } catch (error) {
-    logger.error('Unhandled error in auth middleware:', error);
+    logger.error(`[${requestId}] Unhandled error in auth middleware:`, error);
     return res.status(500).json({ 
       success: false, 
       message: 'Internal server error during authentication' 

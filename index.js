@@ -1,74 +1,135 @@
+import dotenv from 'dotenv';
 import http from 'http';
-import mongoose from 'mongoose'; // Add missing mongoose import
-import { Server } from 'socket.io';
-import config from './config/config.js';
-import logger from './middleware/logger.js';
-import { connectDatabase } from './utils/dbConnect.js';
-import { setupWebSockets } from './services/websocket.js';
 import app from './app.js';
+import mongoose from 'mongoose';
+import setupWebsocket from './services/websocket.js';
+import logger from './middleware/logger.js';
+
+// Load environment variables
+dotenv.config();
+
+const PORT = process.env.PORT || 5000;
+const ENV = process.env.NODE_ENV || 'development';
+const MONGO_URI = process.env.MONGODB_URI;
+
+logger.info(`Environment: ${ENV}`);
+logger.info(`MongoDB URI: ${MONGO_URI ? 'is defined' : 'is NOT defined'}`);
 
 // Create HTTP server
 const server = http.createServer(app);
 
-// Start the server
-async function startServer() {
+// Connect to MongoDB with retry logic
+const connectDB = async (retryCount = 0) => {
+  const MAX_RETRIES = 3;
+  
   try {
-    // Connect to MongoDB
-    await connectDatabase();
+    if (!MONGO_URI) {
+      throw new Error('MongoDB URI is not defined in environment variables');
+    }
     
-    // Setup WebSockets
-    setupWebSockets(server);
+    logger.info(`Connecting to MongoDB... (Attempt ${retryCount + 1}/${MAX_RETRIES})`);
     
-    // Start listening - Fix port configuration path
-    const PORT = config.server.port;
-    server.listen(PORT, () => {
-      logger.info(`Server running in ${config.server.env} mode on port ${PORT}`);
+    const conn = await mongoose.connect(MONGO_URI, {
+      serverSelectionTimeoutMS: 5000
     });
     
-    // Handle server errors
-    server.on('error', (error) => {
-      logger.error('Server error:', error);
-      process.exit(1);
-    });
+    logger.info(`MongoDB connected: ${conn.connection.host}`);
     
-    // Handle graceful shutdown
-    process.on('SIGTERM', gracefulShutdown);
-    process.on('SIGINT', gracefulShutdown);
+    // Log available collections for debugging
+    const collections = await mongoose.connection.db.listCollections().toArray();
+    logger.info(`Available collections: ${collections.map(c => c.name).join(', ')}`);
+    
+    return conn;
   } catch (error) {
-    logger.error('Failed to start server:', error);
+    logger.error(`MongoDB connection error: ${error.message}`);
+    
+    if (retryCount < MAX_RETRIES - 1) {
+      // Exponential backoff: 2^retryCount * 1000ms
+      const retryDelay = Math.pow(2, retryCount) * 1000;
+      logger.info(`Retrying in ${retryDelay}ms...`);
+      
+      await new Promise(resolve => setTimeout(resolve, retryDelay));
+      return connectDB(retryCount + 1);
+    }
+    
+    logger.error('Failed to connect to MongoDB after multiple attempts.');
     process.exit(1);
   }
-}
+};
 
-// Graceful shutdown function
-function gracefulShutdown() {
-  logger.info('Received shutdown signal, closing connections...');
-  
-  server.close(() => {
-    logger.info('HTTP server closed');
+// Initialize server
+const initServer = async () => {
+  try {
+    // Connect to database
+    await connectDB();
     
-    mongoose.connection.close(false, () => {
-      logger.info('MongoDB connection closed');
-      process.exit(0);
+    // Initialize WebSocket server
+    const websocketService = setupWebsocket(server);
+    logger.info('WebSocket server initialized');
+    
+    // Start the server
+    server.listen(PORT, () => {
+      logger.info(`Server running in ${ENV} mode on port ${PORT}`);
+      
+      // Log detailed server information
+      const serverInfo = {
+        nodeVersion: process.version,
+        platform: process.platform,
+        memoryUsage: process.memoryUsage(),
+        uptime: process.uptime(),
+        pid: process.pid,
+        env: ENV
+      };
+      
+      logger.debug('Server details:', serverInfo);
+      
+      // Log all registered routes for debugging
+      const routes = [];
+      app._router.stack.forEach(middleware => {
+        if(middleware.route) { // routes registered directly on the app
+          routes.push({
+            path: middleware.route.path,
+            methods: Object.keys(middleware.route.methods)
+          });
+        } else if(middleware.name === 'router') { // router middleware
+          middleware.handle.stack.forEach(handler => {
+            if(handler.route) {
+              routes.push({
+                path: handler.route.path,
+                methods: Object.keys(handler.route.methods),
+                middleware: middleware.regexp.toString()
+              });
+            }
+          });
+        }
+      });
+      
+      logger.debug('Registered API routes:', routes);
     });
-    
-    // Force exit after 10 seconds if connections don't close properly
-    setTimeout(() => {
-      logger.error('Could not close connections in time, forcefully shutting down');
-      process.exit(1);
-    }, 10000);
-  });
-}
+  } catch (error) {
+    logger.error(`Server initialization error: ${error.message}`);
+    process.exit(1);
+  }
+};
 
-// Handle uncaught exceptions and unhandled promise rejections
-process.on('uncaughtException', (error) => {
-  logger.error('Uncaught Exception:', error);
-  gracefulShutdown();
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (err) => {
+  logger.error(`Unhandled Promise Rejection: ${err.message}`);
+  logger.error(err.stack);
+  // Don't crash the server, but log it seriously
 });
 
-process.on('unhandledRejection', (reason, promise) => {
-  logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
+// Handle uncaught exceptions
+process.on('uncaughtException', (err) => {
+  logger.error(`Uncaught Exception: ${err.message}`);
+  logger.error(err.stack);
+  // Give the server time to log the error before shutting down
+  setTimeout(() => {
+    process.exit(1);
+  }, 1000);
 });
 
-// Start the server
-startServer();
+// Initialize server
+initServer();
+
+export default server;

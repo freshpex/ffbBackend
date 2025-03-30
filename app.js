@@ -7,6 +7,7 @@ import logger, { requestLogger, errorLogger } from './middleware/logger.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { performanceMonitor, memoryMonitor } from './middleware/performance.js';
 import config from './config/config.js';
+import morgan from 'morgan';
 
 // Import routes
 import authRoutes from './routes/auth.js';
@@ -57,6 +58,35 @@ app.use(limiter);
 
 // Request logging
 app.use(requestLogger);
+
+// Add morgan for HTTP request logging
+// Custom token for morgan to log request body for debugging auth
+morgan.token('request-body', (req) => {
+  if (req.method === 'POST' && (req.path.includes('/auth/') || req.path.includes('/login'))) {
+    const safeBody = { ...req.body };
+    // Don't log sensitive info like passwords
+    if (safeBody.password) safeBody.password = '[REDACTED]';
+    if (safeBody.firebaseToken) safeBody.firebaseToken = '[REDACTED]';
+    return JSON.stringify(safeBody);
+  }
+  return '';
+});
+
+// Use morgan with custom format
+app.use(morgan((tokens, req, res) => {
+  return [
+    '\n🔹 Request:',
+    tokens.method(req, res),
+    tokens.url(req, res),
+    'from',
+    tokens['remote-addr'](req, res),
+    '\n  Status:',
+    tokens.status(req, res),
+    '\n  Response time:',
+    tokens['response-time'](req, res), 'ms',
+    tokens['request-body'](req, res) ? `\n  Body: ${tokens['request-body'](req, res)}` : ''
+  ].join(' ');
+}, { stream: { write: message => logger.info(message.trim()) } }));
 
 // Static files
 app.use('/uploads', express.static(config.uploads.dir));
