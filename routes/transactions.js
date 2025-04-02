@@ -1,17 +1,53 @@
 import express from 'express';
-import User from '../models/User.js';
 import Transaction from '../models/Transaction.js';
+import User from '../models/User.js';
+import { asyncHandler } from '../middleware/errorHandler.js';
 import mongoose from 'mongoose';
+import logger from '../middleware/logger.js';
 
 const router = express.Router();
 
-// Get deposits
-router.get('/deposits', async (req, res) => {
+// Get all user's transactions
+router.get('/', asyncHandler(async (req, res) => {
   try {
-    const { status, from, to, limit = 10, page = 1 } = req.query;
+    const { type, status, page = 1, limit = 10 } = req.query;
+    
+    const query = { user: req.user._id };
+    
+    if (type) {
+      query.type = type;
+    }
+    
+    if (status) {
+      query.status = status;
+    }
+    
+    const transactions = await Transaction.find(query)
+      .sort({ createdAt: -1 })
+      .skip((parseInt(page) - 1) * parseInt(limit))
+      .limit(parseInt(limit));
+    
+    const total = await Transaction.countDocuments(query);
+    
+    res.status(200).json({
+      transactions,
+      page: parseInt(page),
+      totalPages: Math.ceil(total / parseInt(limit)),
+      total
+    });
+  } catch (error) {
+    logger.error('Error fetching transactions:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+}));
+
+// Get user's deposits
+router.get('/deposits', asyncHandler(async (req, res) => {
+  try {
+    const { status, page = 1, limit = 10 } = req.query;
     
     const query = { 
-      user: req.user.userId,
+      user: req.user._id,
       type: 'deposit'
     };
     
@@ -19,17 +55,9 @@ router.get('/deposits', async (req, res) => {
       query.status = status;
     }
     
-    if (from || to) {
-      query.createdAt = {};
-      if (from) query.createdAt.$gte = new Date(from);
-      if (to) query.createdAt.$lte = new Date(to);
-    }
-    
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-    
     const deposits = await Transaction.find(query)
       .sort({ createdAt: -1 })
-      .skip(skip)
+      .skip((parseInt(page) - 1) * parseInt(limit))
       .limit(parseInt(limit));
     
     const total = await Transaction.countDocuments(query);
@@ -41,18 +69,18 @@ router.get('/deposits', async (req, res) => {
       total
     });
   } catch (error) {
-    console.error('Error fetching deposits:', error);
+    logger.error('Error fetching deposits:', error);
     res.status(500).json({ message: 'Server error' });
   }
-});
+}));
 
-// Get withdrawals
-router.get('/withdrawals', async (req, res) => {
+// Get user's withdrawals
+router.get('/withdrawals', asyncHandler(async (req, res) => {
   try {
-    const { status, from, to, limit = 10, page = 1 } = req.query;
+    const { status, page = 1, limit = 10 } = req.query;
     
     const query = { 
-      user: req.user.userId,
+      user: req.user._id,
       type: 'withdrawal'
     };
     
@@ -60,17 +88,9 @@ router.get('/withdrawals', async (req, res) => {
       query.status = status;
     }
     
-    if (from || to) {
-      query.createdAt = {};
-      if (from) query.createdAt.$gte = new Date(from);
-      if (to) query.createdAt.$lte = new Date(to);
-    }
-    
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-    
     const withdrawals = await Transaction.find(query)
       .sort({ createdAt: -1 })
-      .skip(skip)
+      .skip((parseInt(page) - 1) * parseInt(limit))
       .limit(parseInt(limit));
     
     const total = await Transaction.countDocuments(query);
@@ -85,7 +105,7 @@ router.get('/withdrawals', async (req, res) => {
     console.error('Error fetching withdrawals:', error);
     res.status(500).json({ message: 'Server error' });
   }
-});
+}));
 
 // Create deposit request
 router.post('/deposit', async (req, res) => {
@@ -104,36 +124,35 @@ router.post('/deposit', async (req, res) => {
     }
     
     const transaction = new Transaction({
-      user: req.user.userId,
+      user: req.user._id,
       type: 'deposit',
       amount,
       currency,
       method,
       walletAddress,
       status: 'pending',
-      description: `Deposit of ${amount} ${currency} via ${method}`
+      description: `Deposit via ${method}`
     });
     
     await transaction.save({ session });
     
     await session.commitTransaction();
-    session.endSession();
     
     res.status(201).json({
       message: 'Deposit request created successfully',
-      transaction
+      transaction: transaction
     });
   } catch (error) {
     await session.abortTransaction();
-    session.endSession();
-    
-    console.error('Error creating deposit:', error);
+    logger.error('Error creating deposit:', error);
     res.status(500).json({ message: 'Server error' });
+  } finally {
+    session.endSession();
   }
 });
 
 // Create withdrawal request
-router.post('/withdraw', async (req, res) => {
+router.post('/withdrawal', async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   
@@ -145,15 +164,14 @@ router.post('/withdraw', async (req, res) => {
     }
     
     if (!method) {
-      return res.status(400).json({ message: 'Withdrawal method is required' });
+      return res.status(400).json({ message: 'Payment method is required' });
     }
     
-    if (['bitcoin', 'ethereum', 'litecoin'].includes(method) && !walletAddress) {
+    if (['cryptocurrency', 'bitcoin', 'ethereum'].includes(method) && !walletAddress) {
       return res.status(400).json({ message: 'Wallet address is required for crypto withdrawals' });
     }
     
-    // Check if user has sufficient balance
-    const user = await User.findById(req.user.userId);
+    const user = await User.findById(req.user._id);
     
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
@@ -163,104 +181,77 @@ router.post('/withdraw', async (req, res) => {
       return res.status(400).json({ message: 'Insufficient balance' });
     }
     
+    // Calculate fee - 1% for example
+    const fee = parseFloat((amount * 0.01).toFixed(2));
+    const totalAmount = amount + fee;
+    
+    if (user.balance < totalAmount) {
+      return res.status(400).json({ 
+        message: `Insufficient balance. You need ${totalAmount} (including ${fee} fee) but have ${user.balance}`
+      });
+    }
+    
+    // Deduct amount + fee from user balance immediately
+    user.balance -= totalAmount;
+    await user.save({ session });
+    
     // Create withdrawal transaction
     const transaction = new Transaction({
-      user: req.user.userId,
+      user: user._id,
       type: 'withdrawal',
-      amount,
+      amount: -amount, // Negative amount for withdrawal
+      fee,
       currency,
       method,
       walletAddress,
       status: 'pending',
-      description: `Withdrawal of ${amount} ${currency} via ${method}`
+      description: `Withdrawal via ${method}`
     });
     
     await transaction.save({ session });
     
-    // Update user balance
-    await User.findByIdAndUpdate(
-      req.user.userId,
-      { $inc: { balance: -amount } },
-      { session }
-    );
+    // Create fee transaction
+    const feeTransaction = new Transaction({
+      user: user._id,
+      type: 'fee',
+      amount: -fee, // Negative amount for fee
+      currency,
+      method: 'system',
+      status: 'completed',
+      description: 'Withdrawal fee',
+      reference: transaction._id.toString(),
+      processedAt: new Date()
+    });
+    
+    await feeTransaction.save({ session });
     
     await session.commitTransaction();
-    session.endSession();
     
     res.status(201).json({
       message: 'Withdrawal request created successfully',
-      transaction
+      transaction: transaction
     });
   } catch (error) {
     await session.abortTransaction();
+    logger.error('Error creating withdrawal:', error);
+    res.status(500).json({ message: 'Server error' });
+  } finally {
     session.endSession();
-    
-    console.error('Error creating withdrawal:', error);
-    res.status(500).json({ message: 'Server error' });
   }
 });
 
-// Get single transaction
-router.get('/:id', async (req, res) => {
-  try {
-    const transaction = await Transaction.findOne({
-      _id: req.params.id,
-      user: req.user.userId
-    });
-    
-    if (!transaction) {
-      return res.status(404).json({ message: 'Transaction not found' });
-    }
-    
-    res.status(200).json(transaction);
-  } catch (error) {
-    console.error('Error fetching transaction:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
-
-// Cancel pending transaction
-router.post('/:id/cancel', async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
+// Get transaction by ID
+router.get('/:id', asyncHandler(async (req, res) => {
+  const transaction = await Transaction.findOne({
+    _id: req.params.id,
+    user: req.user._id
+  });
   
-  try {
-    const transaction = await Transaction.findOne({
-      _id: req.params.id,
-      user: req.user.userId,
-      status: 'pending'
-    });
-    
-    if (!transaction) {
-      return res.status(404).json({ message: 'Transaction not found or cannot be cancelled' });
-    }
-    
-    // For withdrawals, return funds to user balance
-    if (transaction.type === 'withdrawal') {
-      await User.findByIdAndUpdate(
-        req.user.userId,
-        { $inc: { balance: transaction.amount } },
-        { session }
-      );
-    }
-    
-    transaction.status = 'cancelled';
-    await transaction.save({ session });
-    
-    await session.commitTransaction();
-    session.endSession();
-    
-    res.status(200).json({
-      message: 'Transaction cancelled successfully',
-      transaction
-    });
-  } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
-    
-    console.error('Error cancelling transaction:', error);
-    res.status(500).json({ message: 'Server error' });
+  if (!transaction) {
+    return res.status(404).json({ message: 'Transaction not found' });
   }
-});
+  
+  res.status(200).json(transaction);
+}));
 
 export default router;

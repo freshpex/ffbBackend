@@ -38,7 +38,11 @@ const apiKeySchema = new mongoose.Schema({
 const kycDocumentSchema = new mongoose.Schema({
   url: {
     type: String,
-    required: true
+    required: function() {
+      // Only require if parent object is present and verified is true
+      return this.parent().verified === true;
+    },
+    default: 'pending'
   },
   verified: {
     type: Boolean,

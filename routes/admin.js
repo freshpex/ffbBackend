@@ -3,14 +3,103 @@ import User from '../models/User.js';
 import Transaction from '../models/Transaction.js';
 import Investment from '../models/Investment.js';
 import Order from '../models/Order.js';
-import { verifyToken, requireAdmin, requireSuperAdmin, checkRole } from '../middleware/auth.js';
+import { verifyToken, requireAdmin, requireSuperAdmin } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import logger from '../middleware/logger.js';
+import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
 
 const router = express.Router();
 
-// Apply authentication to all admin routes
+// Admin login route
+router.post('/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    
+    logger.info(`Admin login attempt: ${email}`);
+    
+    if (!email || !password) {
+      logger.warn(`Admin login failed: Missing email or password`);
+      return res.status(400).json({ message: 'Email and password are required' });
+    }
+    
+    const admin = await User.findOne({ 
+      email, 
+      role: { $in: ['admin', 'superadmin'] }
+    });
+    
+    if (!admin) {
+      logger.warn(`Admin login failed: No admin found with email ${email}`);
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
+    
+    const isMatch = await admin.comparePassword(password);
+    
+    if (!isMatch) {
+      logger.warn(`Admin login failed: Invalid password for ${email}`);
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
+    
+    const token = jwt.sign(
+      { 
+        userId: admin._id, 
+        email: admin.email, 
+        role: admin.role 
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+    
+    admin.lastLoginAt = new Date();
+    await admin.save();
+    
+    logger.info(`Admin login successful: ${admin.email}`);
+    
+    res.status(200).json({
+      success: true,
+      token,
+      admin: {
+        id: admin._id,
+        email: admin.email,
+        name: `${admin.firstName} ${admin.lastName}`,
+        role: admin.role,
+        permissions: admin.permissions || []
+      }
+    });
+  } catch (error) {
+    logger.error('Admin login error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Apply authentication to all admin routes below this point
 router.use(verifyToken);
+
+// Verify admin token
+router.get('/verify-token', (req, res, next) => {
+  try {
+    if (!req.user || !req.user.role || !['admin', 'superadmin'].includes(req.user.role)) {
+      return res.status(403).json({ 
+        success: false,
+        message: 'Access denied. Admin privileges required' 
+      });
+    }
+    
+    res.status(200).json({
+      success: true,
+      admin: {
+        id: req.user._id,
+        email: req.user.email,
+        name: `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim(),
+        role: req.user.role,
+        permissions: req.user.permissions || []
+      }
+    });
+  } catch (error) {
+    logger.error('Error verifying admin token:', error);
+    next(error);
+  }
+});
 
 // Get all users (admin only)
 router.get('/users', requireAdmin, asyncHandler(async (req, res) => {
@@ -72,7 +161,6 @@ router.get('/users/:id', requireAdmin, asyncHandler(async (req, res) => {
 router.put('/users/:id', requireAdmin, asyncHandler(async (req, res) => {
   const { firstName, lastName, role, status, balance, kycVerified, tradingEnabled } = req.body;
   
-  // Restrict role changes to superadmin
   if (role === 'superadmin' && req.user.role !== 'superadmin') {
     return res.status(403).json({ message: 'Only superadmins can assign superadmin role' });
   }
@@ -84,12 +172,10 @@ router.put('/users/:id', requireAdmin, asyncHandler(async (req, res) => {
   if (kycVerified !== undefined) allowedUpdates.kycVerified = kycVerified;
   if (tradingEnabled !== undefined) allowedUpdates.tradingEnabled = tradingEnabled;
   
-  // Only admins can update role
   if (role && req.user.role === 'admin') {
     allowedUpdates.role = role;
   }
   
-  // Only admins can update balance
   if (balance !== undefined && req.user.role === 'admin') {
     allowedUpdates.balance = balance;
   }
@@ -116,7 +202,6 @@ router.delete('/users/:id', requireSuperAdmin, asyncHandler(async (req, res) => 
     return res.status(404).json({ message: 'User not found' });
   }
   
-  // Prevent deleting another superadmin
   if (user.role === 'superadmin') {
     return res.status(403).json({ message: 'Cannot delete a superadmin account' });
   }

@@ -47,43 +47,22 @@ const upload = multer({
 // Get user profile
 router.get('/profile', verifyToken, async (req, res) => {
   try {
-    const userId = req.user?.userId;
-    const userEmail = req.user?.email;
-    
-    if (!userId && !userEmail) {
-      return res.status(401).json({ message: 'Unauthorized access - user identification missing' });
-    }
-    
-    let user;
-    if (userId) {
-      user = await User.findById(userId).select('-apiKeys.secret');
-    }
-    
-    if (!user && userEmail) {
-      user = await User.findOne({ email: userEmail }).select('-apiKeys.secret');
-    }
-    
-    if (!user) {
-      logger.warn(`User profile not found for ${userEmail || userId}`);
-      return res.status(404).json({ message: 'User not found' });
-    }
+    const user = req.user;
     
     res.status(200).json({
       id: user._id,
-      uid: user.uid,
       email: user.email,
       firstName: user.firstName,
       lastName: user.lastName,
       role: user.role,
-      balance: user.balance || 0,
-      kycVerified: user.kycVerified || false,
-      tradingEnabled: user.tradingEnabled !== false,
+      balance: user.balance,
+      kycVerified: user.kycVerified,
       referralCode: user.referralCode,
-      settings: user.settings || {}
+      createdAt: user.createdAt
     });
   } catch (error) {
-    logger.error('Error retrieving user profile:', error);
-    res.status(500).json({ message: 'Server error retrieving user profile' });
+    logger.error('Error fetching user profile:', error);
+    res.status(500).json({ message: 'Server error' });
   }
 });
 

@@ -1,45 +1,31 @@
 import { Server } from 'socket.io';
-import { WebSocket } from 'ws';
 import logger from '../middleware/logger.js';
 
-// Create the WebSocket service
 const setupWebsocket = (server) => {
   const io = new Server(server, {
     cors: {
-      origin: process.env.CORS_ORIGIN || "*",
-      methods: ["GET", "POST"]
+      origin: process.env.CLIENT_URL || '*',
+      methods: ['GET', 'POST']
     }
   });
-
-  // Store connected clients
+  
   const connectedClients = new Map();
 
   io.on('connection', (socket) => {
-    logger.info(`WebSocket client connected: ${socket.id}`);
-    
-    // Store client info
-    connectedClients.set(socket.id, {
-      id: socket.id,
+    connectedClients.set(socket.id, { 
+      id: socket.id, 
+      authenticated: false,
+      userId: null,
       joinedAt: new Date()
     });
 
-    // Send welcome message
-    socket.emit('welcome', {
-      message: 'Connected to FFB WebSocket server',
-      clientId: socket.id
-    });
-
-    // Handle client authentication
-    socket.on('authenticate', (data) => {
+    // Handle authentication
+    socket.on('authenticate', async (data) => {
       try {
-        // Here you would verify the token and update client info
-        const clientInfo = connectedClients.get(socket.id);
-        
-        if (clientInfo && data.userId) {
+        if (data.token) {
+          const clientInfo = connectedClients.get(socket.id);
           clientInfo.userId = data.userId;
           clientInfo.authenticated = true;
-          
-          logger.info(`WebSocket client authenticated: ${socket.id} (User: ${data.userId})`);
           
           // Join user-specific room for targeted updates
           socket.join(`user:${data.userId}`);
@@ -47,7 +33,6 @@ const setupWebsocket = (server) => {
           socket.emit('authenticated', { status: 'success' });
         }
       } catch (error) {
-        logger.error(`WebSocket authentication error: ${error.message}`);
         socket.emit('authenticated', { 
           status: 'error',
           message: 'Authentication failed'
@@ -59,7 +44,6 @@ const setupWebsocket = (server) => {
     socket.on('subscribe', (data) => {
       if (data.channel) {
         socket.join(data.channel);
-        logger.info(`Client ${socket.id} subscribed to ${data.channel}`);
         socket.emit('subscribed', { channel: data.channel });
       }
     });
@@ -68,13 +52,11 @@ const setupWebsocket = (server) => {
     socket.on('unsubscribe', (data) => {
       if (data.channel) {
         socket.leave(data.channel);
-        logger.info(`Client ${socket.id} unsubscribed from ${data.channel}`);
       }
     });
 
     // Handle disconnection
     socket.on('disconnect', () => {
-      logger.info(`WebSocket client disconnected: ${socket.id}`);
       connectedClients.delete(socket.id);
     });
   });
@@ -102,17 +84,14 @@ const setupWebsocket = (server) => {
     io.emit('announcement', announcement);
   };
 
-  logger.info("WebSocket service initialized successfully");
-
   // Return methods that can be used elsewhere in the application
   return {
+    io,
     broadcastMarketData,
     sendUserNotification,
     broadcastAnnouncement,
-    io
+    getConnectedClients: () => connectedClients.size
   };
 };
 
-// Make it available with both default and named exports for backward compatibility
-export { setupWebsocket };
 export default setupWebsocket;

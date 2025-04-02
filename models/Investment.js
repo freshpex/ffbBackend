@@ -1,58 +1,52 @@
 import mongoose from 'mongoose';
 
-const InvestmentSchema = new mongoose.Schema(
-  {
-    user: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true,
-    },
-    plan: {
-      type: String,
-      required: true,
-    },
-    amount: {
-      type: Number,
-      required: true,
-    },
-    currency: {
-      type: String,
-      default: 'USD',
-    },
-    startDate: {
-      type: Date,
-      default: Date.now,
-    },
-    endDate: {
-      type: Date,
-      required: true,
-    },
-    status: {
-      type: String,
-      enum: ['active', 'completed', 'cancelled'],
-      default: 'active',
-    },
-    weeklyROI: {
-      type: Number,
-      required: true,
-    },
-    totalEarned: {
-      type: Number,
-      default: 0,
-    },
-    lastPayout: {
-      type: Date,
-      default: null,
-    },
-    payoutHistory: [
-      {
-        amount: Number,
-        date: Date,
-        status: String,
-      },
-    ],
+const investmentSchema = new mongoose.Schema({
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
   },
-  { timestamps: true }
-);
+  amount: {
+    type: Number,
+    required: true,
+    min: 1
+  },
+  planId: {
+    type: String,
+    required: true
+  },
+  status: {
+    type: String,
+    enum: ['active', 'completed', 'cancelled'],
+    default: 'active'
+  },
+  returnRate: {
+    type: Number,
+    required: true
+  },
+  duration: { // Duration in days
+    type: Number,
+    required: true
+  },
+  startDate: {
+    type: Date,
+    default: Date.now
+  },
+  endDate: {
+    type: Date,
+    required: true
+  },
+  lastPayout: {
+    type: Date
+  },
+  totalReturns: {
+    type: Number,
+    default: 0
+  }
+}, {
+  timestamps: true
+});
 
-export default mongoose.model('Investment', InvestmentSchema);
+const Investment = mongoose.model('Investment', investmentSchema);
+
+export default Investment;

@@ -3,6 +3,7 @@ import axios from 'axios';
 import logger from '../middleware/logger.js';
 import config from '../config/config.js';
 import { callWithRetry } from '../utils/apiHelper.js';
+import { asyncHandler } from '../middleware/errorHandler.js';
 
 const router = express.Router();
 
@@ -513,5 +514,149 @@ router.get('/proxy/coingecko/:endpoint(*)', async (req, res) => {
     });
   }
 });
+
+// Get market data for a specific symbol
+router.get('/:symbol', asyncHandler(async (req, res) => {
+  const { symbol } = req.params;
+  const apiUrl = process.env.BINANCE_API_URL || 'https://api.binance.com/api/v3';
+  
+  try {
+    const response = await axios.get(`${apiUrl}/ticker/24hr`, {
+      params: { symbol: symbol.toUpperCase() }
+    });
+    
+    res.status(200).json(response.data);
+  } catch (error) {
+    logger.error(`Error fetching market data for ${symbol}:`, error);
+    
+    // Return mock data in development if API call fails
+    if (process.env.USE_MOCK_DATA === 'true' && process.env.NODE_ENV === 'development') {
+      res.status(200).json({
+        symbol: symbol.toUpperCase(),
+        priceChange: "124.10000000",
+        priceChangePercent: "2.380",
+        weightedAvgPrice: "5345.32467998",
+        prevClosePrice: "5214.30000000",
+        lastPrice: "5338.40000000",
+        lastQty: "0.05000000",
+        bidPrice: "5338.30000000",
+        bidQty: "0.86000000",
+        askPrice: "5338.40000000",
+        askQty: "0.56000000",
+        openPrice: "5214.30000000",
+        highPrice: "5472.00000000",
+        lowPrice: "5204.00000000",
+        volume: "88418.65500000",
+        quoteVolume: "472532163.61000000",
+        openTime: Date.now() - 24 * 60 * 60 * 1000,
+        closeTime: Date.now(),
+        firstId: 151365,
+        lastId: 162372,
+        count: 11008
+      });
+    } else {
+      res.status(500).json({ 
+        error: 'Failed to fetch market data',
+        message: error.message
+      });
+    }
+  }
+}));
+
+// Get candlestick data
+router.get('/:symbol/klines', asyncHandler(async (req, res) => {
+  const { symbol } = req.params;
+  const { interval = '1h', limit = 100 } = req.query;
+  const apiUrl = process.env.BINANCE_API_URL || 'https://api.binance.com/api/v3';
+  
+  try {
+    const response = await axios.get(`${apiUrl}/klines`, {
+      params: { 
+        symbol: symbol.toUpperCase(),
+        interval,
+        limit
+      }
+    });
+    
+    res.status(200).json(response.data);
+  } catch (error) {
+    logger.error(`Error fetching klines for ${symbol}:`, error);
+    
+    // Return mock data in development
+    if (process.env.USE_MOCK_DATA === 'true' && process.env.NODE_ENV === 'development') {
+      // Generate mock candlestick data
+      const now = Date.now();
+      const mockData = [];
+      
+      for (let i = 0; i < limit; i++) {
+        const time = now - i * 60 * 60 * 1000; // 1h intervals
+        const open = 5000 + Math.random() * 1000;
+        const high = open + Math.random() * 100;
+        const low = open - Math.random() * 100;
+        const close = low + Math.random() * (high - low);
+        const volume = Math.random() * 100;
+        
+        mockData.push([
+          time, // Open time
+          open.toString(), // Open
+          high.toString(), // High
+          low.toString(), // Low
+          close.toString(), // Close
+          volume.toString(), // Volume
+          time + 60 * 60 * 1000, // Close time
+          volume * close, // Quote asset volume
+          10, // Number of trades
+          volume * 0.5, // Taker buy base asset volume
+          volume * 0.5 * close, // Taker buy quote asset volume
+          "0" // Ignore
+        ]);
+      }
+      
+      res.status(200).json(mockData.reverse());
+    } else {
+      res.status(500).json({ 
+        error: 'Failed to fetch candlestick data',
+        message: error.message
+      });
+    }
+  }
+}));
+
+// Get all available trading symbols
+router.get('/symbols', asyncHandler(async (req, res) => {
+  const apiUrl = process.env.BINANCE_API_URL || 'https://api.binance.com/api/v3';
+  
+  try {
+    const response = await axios.get(`${apiUrl}/exchangeInfo`);
+    const symbols = response.data.symbols.map(s => ({
+      symbol: s.symbol,
+      baseAsset: s.baseAsset,
+      quoteAsset: s.quoteAsset,
+      status: s.status
+    }));
+    
+    res.status(200).json(symbols);
+  } catch (error) {
+    logger.error('Error fetching symbols:', error);
+    
+    // Return mock data in development
+    if (process.env.USE_MOCK_DATA === 'true' && process.env.NODE_ENV === 'development') {
+      const mockSymbols = [
+        { symbol: 'BTCUSDT', baseAsset: 'BTC', quoteAsset: 'USDT', status: 'TRADING' },
+        { symbol: 'ETHUSDT', baseAsset: 'ETH', quoteAsset: 'USDT', status: 'TRADING' },
+        { symbol: 'ADAUSDT', baseAsset: 'ADA', quoteAsset: 'USDT', status: 'TRADING' },
+        { symbol: 'DOGEUSDT', baseAsset: 'DOGE', quoteAsset: 'USDT', status: 'TRADING' },
+        { symbol: 'BNBUSDT', baseAsset: 'BNB', quoteAsset: 'USDT', status: 'TRADING' }
+      ];
+      
+      res.status(200).json(mockSymbols);
+    } else {
+      res.status(500).json({ 
+        error: 'Failed to fetch symbols',
+        message: error.message
+      });
+    }
+  }
+}));
 
 export default router;

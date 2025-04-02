@@ -18,16 +18,16 @@ const metrics = {
     byEndpoint: new Map(),
     byType: new Map()
   },
-  slowRequests: [], // Array of slow request details
+  slowRequests: [],
   startTime: Date.now()
 };
 
-// Utility to safely increment a map counter
+// Utility to increment a map counter
 const incrementMapCounter = (map, key) => {
   map.set(key, (map.get(key) || 0) + 1);
 };
 
-// Utility to safely add to a map average
+// Utility to update a map average
 const updateMapAverage = (map, key, value) => {
   if (!map.has(key)) {
     map.set(key, { total: 0, count: 0, avg: 0 });
@@ -42,9 +42,9 @@ const updateMapAverage = (map, key, value) => {
 // Performance monitoring middleware
 export const performanceMonitor = (options = {}) => {
   const defaults = {
-    slowThreshold: 1000, // Log requests taking more than 1s
-    sampleRate: 1.0, // Sample all requests by default
-    maxSlowRequests: 100, // Keep track of at most 100 slow requests
+    slowThreshold: 1000,
+    sampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
+    maxSlowRequests: 100,
   };
   
   const opts = { ...defaults, ...options };
@@ -91,20 +91,18 @@ export const performanceMonitor = (options = {}) => {
       if (durationMs > opts.slowThreshold) {
         logger.warn(`Slow request: ${method} ${endpoint} (${durationMs.toFixed(2)}ms)`);
         
-        // Keep a limited history of slow requests
-        if (metrics.slowRequests.length >= opts.maxSlowRequests) {
-          // Remove the oldest entry
+        metrics.slowRequests.push({
+          timestamp: new Date(),
+          duration: durationMs,
+          endpoint,
+          method,
+          statusCode
+        });
+        
+        // Keep array size limited
+        if (metrics.slowRequests.length > opts.maxSlowRequests) {
           metrics.slowRequests.shift();
         }
-        
-        metrics.slowRequests.push({
-          method,
-          endpoint,
-          duration: durationMs,
-          statusCode,
-          timestamp: new Date().toISOString(),
-          userId: req.user?.userId || null
-        });
       }
     });
     
@@ -112,89 +110,16 @@ export const performanceMonitor = (options = {}) => {
   };
 };
 
-// Utility to get performance metrics
-export const getMetrics = () => {
-  // Calculate additional metrics
-  const avgResponseTime = metrics.responseTime.count > 0 
-    ? metrics.responseTime.total / metrics.responseTime.count 
-    : 0;
-  
-  // Calculate error rate
-  const errorRate = metrics.requests.total > 0 
-    ? (metrics.errors.total / metrics.requests.total) * 100 
-    : 0;
-  
-  // Convert maps to objects for better serialization
-  const endpointStats = Object.fromEntries(
-    Array.from(metrics.responseTime.byEndpoint.entries()).map(([key, value]) => [
-      key, 
-      { 
-        avg: value.avg.toFixed(2), 
-        count: value.count, 
-        errors: metrics.errors.byEndpoint.get(key) || 0 
-      }
-    ])
-  );
-  
-  return {
-    uptime: Math.floor((Date.now() - metrics.startTime) / 1000),
-    requests: {
-      total: metrics.requests.total,
-      byMethod: Object.fromEntries(metrics.requests.byMethod),
-      byStatus: Object.fromEntries(metrics.requests.byStatus)
-    },
-    responseTime: {
-      avg: avgResponseTime.toFixed(2),
-      byEndpoint: endpointStats
-    },
-    errors: {
-      total: metrics.errors.total,
-      rate: errorRate.toFixed(2) + '%',
-      byType: Object.fromEntries(metrics.errors.byType)
-    },
-    slowRequests: metrics.slowRequests.slice(-10) // Return the 10 most recent slow requests
-  };
-};
-
-// Middleware to reset metrics
-export const resetMetrics = () => {
-  metrics.requests.total = 0;
-  metrics.requests.byEndpoint.clear();
-  metrics.requests.byMethod.clear();
-  metrics.requests.byStatus.clear();
-  
-  metrics.responseTime.total = 0;
-  metrics.responseTime.count = 0;
-  metrics.responseTime.byEndpoint.clear();
-  
-  metrics.errors.total = 0;
-  metrics.errors.byEndpoint.clear();
-  metrics.errors.byType.clear();
-  
-  metrics.slowRequests = [];
-  metrics.startTime = Date.now();
-  
-  return { success: true, message: 'Metrics have been reset' };
-};
-
-// Route handler to get performance metrics
-export const metricsHandler = (req, res) => {
-  res.json(getMetrics());
-};
-
-export default performanceMonitor;
-
-// Modify the memory monitoring to run less frequently
+// Memory monitoring middleware
 export const memoryMonitor = (req, res, next) => {
-  // Only run monitoring on a sample of requests (e.g., 10%)
-  if (Math.random() < 0.1) {
-    const memoryUsage = process.memoryUsage();
-    
-    // Check if memory usage is high
-    if (memoryUsage.heapUsed / memoryUsage.heapTotal > 0.85 || 
-        memoryUsage.rss > 100 * 1024 * 1024) { // 100MB threshold
+  const memoryThresholdMB = 1024; // 1GB
+  const memoryUsage = process.memoryUsage();
+  
+  // Check if memory usage exceeds threshold
+  if (memoryUsage.heapUsed > memoryThresholdMB * 1024 * 1024) {
+    // Only log in production or if it's serious
+    if (process.env.NODE_ENV === 'production') {
       logger.warn('High memory usage detected', {
-        service: 'broker-api',
         memoryUsage: {
           rss: (memoryUsage.rss / (1024 * 1024)).toFixed(2),
           heapTotal: (memoryUsage.heapTotal / (1024 * 1024)).toFixed(2),
@@ -208,16 +133,12 @@ export const memoryMonitor = (req, res, next) => {
   next();
 };
 
-// Export a function to check and log memory usage on demand
 export const checkMemoryUsage = () => {
   const memoryUsage = process.memoryUsage();
-  const memoryUsageInMB = {
+  return {
     rss: (memoryUsage.rss / 1024 / 1024).toFixed(2),
     heapTotal: (memoryUsage.heapTotal / 1024 / 1024).toFixed(2),
     heapUsed: (memoryUsage.heapUsed / 1024 / 1024).toFixed(2),
     external: (memoryUsage.external / 1024 / 1024).toFixed(2),
   };
-  
-  logger.debug('Current memory usage', { memoryUsage: memoryUsageInMB });
-  return memoryUsageInMB;
 };

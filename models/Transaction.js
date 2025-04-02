@@ -1,52 +1,49 @@
 import mongoose from 'mongoose';
 
-const TransactionSchema = new mongoose.Schema(
-  {
-    user: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true,
-    },
-    type: {
-      type: String,
-      enum: ['deposit', 'withdrawal', 'referral', 'interest', 'investment', 'transfer'],
-      required: true,
-    },
-    amount: {
-      type: Number,
-      required: true,
-    },
-    currency: {
-      type: String,
-      default: 'USD',
-    },
-    status: {
-      type: String,
-      enum: ['pending', 'completed', 'failed', 'cancelled'],
-      default: 'pending',
-    },
-    method: {
-      type: String,
-      enum: ['bitcoin', 'ethereum', 'litecoin', 'card', 'bank', 'internal'],
-      required: true,
-    },
-    walletAddress: {
-      type: String,
-      default: null,
-    },
-    txHash: {
-      type: String,
-      default: null,
-    },
-    description: String,
-    adminNotes: String,
-    approvedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      default: null,
-    },
+const transactionSchema = new mongoose.Schema({
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
   },
-  { timestamps: true }
-);
+  type: {
+    type: String,
+    enum: ['deposit', 'withdrawal', 'transfer', 'investment', 'fee', 'bonus'],
+    required: true
+  },
+  amount: {
+    type: Number,
+    required: true
+  },
+  currency: {
+    type: String,
+    default: 'USD'
+  },
+  status: {
+    type: String,
+    enum: ['pending', 'completed', 'failed', 'rejected'],
+    default: 'pending'
+  },
+  method: {
+    type: String,
+    enum: ['bank_transfer', 'credit_card', 'cryptocurrency', 'internal', 'system']
+  },
+  walletAddress: String,
+  txHash: String,
+  fee: {
+    type: Number,
+    default: 0
+  },
+  reference: String,
+  description: String,
+  metadata: {
+    type: Object
+  },
+  processedAt: Date
+}, {
+  timestamps: true
+});
 
-export default mongoose.model('Transaction', TransactionSchema);
+const Transaction = mongoose.model('Transaction', transactionSchema);
+
+export default Transaction;

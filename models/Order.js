@@ -1,66 +1,69 @@
 import mongoose from 'mongoose';
 
-const OrderSchema = new mongoose.Schema(
-  {
-    user: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true,
-    },
-    symbol: {
-      type: String,
-      required: true,
-    },
-    type: {
-      type: String,
-      enum: ['market', 'limit', 'stop_loss', 'take_profit'],
-      required: true,
-    },
-    side: {
-      type: String,
-      enum: ['buy', 'sell'],
-      required: true,
-    },
-    price: {
-      type: Number,
-    },
-    stopPrice: {
-      type: Number,
-    },
-    quantity: {
-      type: Number,
-      required: true,
-    },
-    executedQuantity: {
-      type: Number,
-      default: 0,
-    },
-    status: {
-      type: String,
-      enum: ['new', 'filled', 'partially_filled', 'canceled', 'rejected', 'expired'],
-      default: 'new',
-    },
-    timeInForce: {
-      type: String,
-      enum: ['GTC', 'IOC', 'FOK'],
-      default: 'GTC',
-    },
-    isIsolated: {
-      type: Boolean,
-      default: false,
-    },
-    fees: {
-      type: Number,
-      default: 0,
-    },
-    feesCurrency: {
-      type: String,
-      default: 'BNB',
-    },
-    externalOrderId: String,
-    txHash: String,
+const orderSchema = new mongoose.Schema({
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
   },
-  { timestamps: true }
-);
+  symbol: {
+    type: String,
+    required: true
+  },
+  type: {
+    type: String,
+    enum: ['market', 'limit', 'stop', 'stop_limit'],
+    default: 'market'
+  },
+  side: {
+    type: String,
+    enum: ['buy', 'sell'],
+    required: true
+  },
+  quantity: {
+    type: Number,
+    required: true
+  },
+  price: {
+    type: Number
+  },
+  stopPrice: {
+    type: Number
+  },
+  status: {
+    type: String,
+    enum: ['new', 'partially_filled', 'filled', 'canceled', 'rejected', 'expired'],
+    default: 'new'
+  },
+  filledQuantity: {
+    type: Number,
+    default: 0
+  },
+  averagePrice: {
+    type: Number
+  },
+  totalFilled: {
+    type: Number,
+    default: 0
+  },
+  commission: {
+    type: Number,
+    default: 0
+  },
+  clientOrderId: {
+    type: String
+  },
+  exchange: {
+    type: String,
+    default: 'binance'
+  },
+  metadata: {
+    type: Object
+  }
+}, {
+  timestamps: true
+});
 
-export default mongoose.model('Order', OrderSchema);
+const Order = mongoose.model('Order', orderSchema);
+
+export default Order;
