@@ -1,4 +1,6 @@
 import logger from './logger.js';
+import express from 'express';
+import responseTime from 'response-time';
 
 // Simple in-memory metrics storage
 const metrics = {
@@ -141,4 +143,109 @@ export const checkMemoryUsage = () => {
     heapUsed: (memoryUsage.heapUsed / 1024 / 1024).toFixed(2),
     external: (memoryUsage.external / 1024 / 1024).toFixed(2),
   };
+};
+
+/**
+ * Sets up performance monitoring middleware for the Express application
+ * @param {express.Application} app - The Express application
+ */
+export const setupPerformanceMonitoring = (app) => {
+  // Add response time tracking middleware
+  app.use(responseTime((req, res, time) => {
+    // Skip logging for health checks and static files to reduce noise
+    if (req.path.startsWith('/api/health') || req.path.startsWith('/uploads')) {
+      return;
+    }
+    
+    // Warning threshold for slow requests (500ms)
+    const slowRequestThreshold = 500;
+    
+    // Log request time
+    if (time > slowRequestThreshold) {
+      logger.warn(`Slow request: ${req.method} ${req.originalUrl} - ${time.toFixed(2)}ms`);
+    } else {
+      logger.debug(`Request timing: ${req.method} ${req.originalUrl} - ${time.toFixed(2)}ms`);
+    }
+    
+    // Add response time to response headers
+    res.set('X-Response-Time', `${time.toFixed(2)}ms`);
+  }));
+  
+  // Memory usage monitoring
+  const memoryMonitoringInterval = 15 * 60 * 1000; // 15 minutes
+  setInterval(() => {
+    const memoryUsage = process.memoryUsage();
+    
+    // Convert bytes to MB for readability
+    const formattedMemoryUsage = {
+      rss: (memoryUsage.rss / 1024 / 1024).toFixed(2) + ' MB',
+      heapTotal: (memoryUsage.heapTotal / 1024 / 1024).toFixed(2) + ' MB',
+      heapUsed: (memoryUsage.heapUsed / 1024 / 1024).toFixed(2) + ' MB',
+      external: (memoryUsage.external / 1024 / 1024).toFixed(2) + ' MB'
+    };
+    
+    logger.info('Memory usage:', formattedMemoryUsage);
+    
+    // Alert if memory usage is high (above 80% of available heap)
+    const heapUsedPercentage = (memoryUsage.heapUsed / memoryUsage.heapTotal) * 100;
+    if (heapUsedPercentage > 80) {
+      logger.warn(`High memory usage: ${heapUsedPercentage.toFixed(2)}% of heap used`);
+    }
+  }, memoryMonitoringInterval);
+  
+  // Performance metrics middleware
+  app.use((req, res, next) => {
+    // Start time measurement
+    const start = process.hrtime();
+    
+    // Record timing after response is sent
+    res.on('finish', () => {
+      const end = process.hrtime(start);
+      const duration = (end[0] * 1000) + (end[1] / 1000000); // Convert to ms
+      
+      // Store performance metrics for monitoring
+      // This could be expanded to store metrics in a database or send to a monitoring service
+      const metrics = {
+        method: req.method,
+        path: req.path,
+        statusCode: res.statusCode,
+        duration: duration.toFixed(2),
+        timestamp: new Date().toISOString()
+      };
+      
+      // Log performance issues
+      if (res.statusCode >= 500) {
+        logger.error('Server error performance metrics:', metrics);
+      } else if (duration > 1000) { // Requests taking more than 1 second
+        logger.warn('Slow request performance metrics:', metrics);
+      }
+    });
+    
+    next();
+  });
+  
+  // Return the Express app for chaining
+  return app;
+};
+
+/**
+ * Middleware for tracking the processing time of a request
+ * Can be used for specific routes that need detailed timing
+ */
+export const trackProcessingTime = (req, res, next) => {
+  req.startTime = Date.now();
+  
+  // Add a method to easily log processing time
+  req.logProcessingTime = (label = 'Processing time') => {
+    const processingTime = Date.now() - req.startTime;
+    logger.info(`${label}: ${processingTime}ms`);
+    return processingTime;
+  };
+  
+  next();
+};
+
+export default {
+  setupPerformanceMonitoring,
+  trackProcessingTime
 };

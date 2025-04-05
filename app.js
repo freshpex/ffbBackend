@@ -1,104 +1,87 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import morgan from 'morgan';
 import compression from 'compression';
-import rateLimit from 'express-rate-limit';
-import config from './config/config.js';
-import logger, {
-  requestLogger,
-  errorLogger
-} from './middleware/logger.js';
-import {
-  performanceMonitor,
-  memoryMonitor
-} from './middleware/performance.js';
-import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
-import { verifyToken } from './middleware/auth.js';
+import morgan from 'morgan';
+import { fileURLToPath } from 'url';
+import path from 'path';
+import { dirname } from 'path';
+import { errorHandler } from './middleware/errorHandler.js';
+import { setupPerformanceMonitoring } from './middleware/performance.js';
+import logger from './middleware/logger.js';
 
 // Import routes
-import authRoutes from './routes/auth.js';
-import userRoutes from './routes/users.js';
-import marketRoutes from './routes/market.js';
-import transactionRoutes from './routes/transactions.js';
-import investmentRoutes from './routes/investments.js';
-import adminRoutes from './routes/admin.js';
-import tradingRoutes from './routes/trading.js';
+import authRouter from './routes/auth.js';
+import userRouter from './routes/users.js';
+import adminRouter from './routes/admin.js';
+import transactionRouter from './routes/transactions.js';
+import depositRouter from './routes/deposits.js';
+import withdrawalRouter from './routes/withdrawals.js';
+import investmentRouter from './routes/investments.js';
+import marketRouter from './routes/market.js';
+import supportRouter from './routes/support.js';
+import atmCardsRouter from './routes/atmCards.js';
+import educationRouter from './routes/education.js';
+import referralRouter from './routes/referrals.js';
+import notificationRouter from './routes/notifications.js';
+import tradingRouter from './routes/trading.js';
+import dashboardRouter from './routes/dashboard.js';
+import priceAlertsRouter from './routes/priceAlerts.js';
+import marketNewsRouter from './routes/marketNews.js';
+import adminAnalyticsRouter from './routes/adminAnalytics.js';
 
+// Initialize Express app
 const app = express();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
-// Security middleware
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      imgSrc: ["'self'", "data:", "https://cdn.example.com"],
-      connectSrc: ["'self'", "https://api.binance.com", "https://api4.binance.com"]
-    }
-  }
-}));
-app.use(cors(config.cors));
+// Setup middleware
+app.use(cors());
+app.use(helmet());
 app.use(compression());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// JSON parser with size limits
-app.use(express.json({ limit: '2mb' }));
-app.use(express.urlencoded({ extended: true, limit: '2mb' }));
+// Log requests
+app.use(morgan('dev'));
 
-// Performance monitoring
-app.use(performanceMonitor());
-app.use(memoryMonitor);
+// Setup performance monitoring
+setupPerformanceMonitoring(app);
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: config.rateLimit.windowMs || 15 * 60 * 1000,
-  max: config.rateLimit.max || 100,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: 'Too many requests from this IP, please try again later'
+// Serve static files from uploads directory
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// API health check
+app.get('/api/health', (req, res) => {
+  res.status(200).json({ status: 'OK', timestamp: new Date().toISOString() });
 });
-app.use(limiter);
 
-// Request logging
-app.use(requestLogger);
-
-// Use morgan with minimal format
-app.use(morgan('tiny', { 
-  stream: { 
-    write: message => logger.info(message.trim()) 
-  } 
-}));
-
-// Static files
-app.use('/uploads', express.static(config.uploads.dir));
-
-// API routes
-app.use('/api/auth', authRoutes);
-app.use('/api/users', verifyToken, userRoutes);
-app.use('/api/market', marketRoutes);
-app.use('/api/transactions', verifyToken, transactionRoutes);
-app.use('/api/investments', verifyToken, investmentRoutes);
-app.use('/api/admin', adminRoutes);
-app.use('/api/trading', verifyToken, tradingRoutes);
-
-// Health check endpoint
-app.get('/', (req, res) => {
-  const healthStatus = {
-    status: 'OK',
-    timestamp: new Date(),
-    uptime: process.uptime(),
-    environment: config.server.env
-  };
-  
-  res.status(200).json(healthStatus);
-});
+// Register routes
+app.use('/api/auth', authRouter);
+app.use('/api/users', userRouter);
+app.use('/api/admin', adminRouter);
+app.use('/api/transactions', transactionRouter);
+app.use('/api/deposits', depositRouter);
+app.use('/api/withdrawals', withdrawalRouter);
+app.use('/api/investments', investmentRouter);
+app.use('/api/market', marketRouter);
+app.use('/api/support', supportRouter);
+app.use('/api/cards', atmCardsRouter);
+app.use('/api/education', educationRouter);
+app.use('/api/referrals', referralRouter);
+app.use('/api/notifications', notificationRouter);
+app.use('/api/trading', tradingRouter);
+app.use('/api/dashboard', dashboardRouter);
+app.use('/api/price-alerts', priceAlertsRouter);
+app.use('/api/market-news', marketNewsRouter);
+app.use('/api/admin/analytics', adminAnalyticsRouter);
 
 // Error handling middleware
-app.use(errorLogger);
 app.use(errorHandler);
 
-// 404 handler for undefined routes
-app.use(notFoundHandler);
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({ message: 'Route not found' });
+});
 
 export default app;

@@ -1,0 +1,398 @@
+import Transaction from '../models/Transaction.js';
+import User from '../models/User.js';
+import mongoose from 'mongoose';
+import logger from '../middleware/logger.js';
+import { ApiError } from '../middleware/errorHandler.js';
+
+// Get all withdrawals for a user
+export const getUserWithdrawals = async (req, res, next) => {
+  try {
+    const { status, page = 1, limit = 10 } = req.query;
+    
+    const query = { 
+      user: req.user._id,
+      type: 'withdrawal'
+    };
+    
+    if (status) {
+      query.status = status;
+    }
+    
+    // Execute query with pagination
+    const total = await Transaction.countDocuments(query);
+    const withdrawals = await Transaction.find(query)
+      .sort({ createdAt: -1 })
+      .skip((parseInt(page) - 1) * parseInt(limit))
+      .limit(parseInt(limit));
+    
+    res.status(200).json({
+      success: true,
+      data: {
+        withdrawals,
+        pagination: {
+          total,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          pages: Math.ceil(total / parseInt(limit))
+        }
+      }
+    });
+  } catch (error) {
+    logger.error('Error fetching user withdrawals:', error);
+    next(error);
+  }
+};
+
+// Get withdrawal by ID
+export const getWithdrawalById = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    
+    const withdrawal = await Transaction.findOne({
+      _id: id,
+      user: req.user._id,
+      type: 'withdrawal'
+    });
+    
+    if (!withdrawal) {
+      throw new ApiError('Withdrawal not found', 404, 'not_found');
+    }
+    
+    res.status(200).json({
+      success: true,
+      data: withdrawal
+    });
+  } catch (error) {
+    logger.error(`Error fetching withdrawal ${req.params.id}:`, error);
+    next(error);
+  }
+};
+
+// Create new withdrawal request
+export const createWithdrawal = async (req, res, next) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  
+  try {
+    const { amount, method, currency = 'USD', walletAddress, bankDetails, description } = req.body;
+    
+    // Validate amount
+    if (!amount || isNaN(amount) || amount <= 0) {
+      throw new ApiError('Valid withdrawal amount is required', 400, 'validation_error');
+    }
+    
+    // Validate method
+    if (!method) {
+      throw new ApiError('Withdrawal method is required', 400, 'validation_error');
+    }
+    
+    // Check if crypto withdrawal requires wallet address
+    if (['cryptocurrency', 'bitcoin', 'ethereum', 'usdt'].includes(method.toLowerCase()) && !walletAddress) {
+      throw new ApiError('Wallet address is required for cryptocurrency withdrawals', 400, 'validation_error');
+    }
+    
+    // Check if bank transfer requires bank details
+    if (method.toLowerCase() === 'bank_transfer' && !bankDetails) {
+      throw new ApiError('Bank details are required for bank transfer withdrawals', 400, 'validation_error');
+    }
+    
+    // Check if user has sufficient balance
+    const user = await User.findById(req.user._id).session(session);
+    
+    if (!user) {
+      throw new ApiError('User not found', 404, 'not_found');
+    }
+    
+    // Calculate fee (e.g., 1% of withdrawal amount)
+    const feePercentage = 0.01;
+    const fee = parseFloat((amount * feePercentage).toFixed(2));
+    const totalAmount = parseFloat(amount) + fee;
+    
+    if (user.balance < totalAmount) {
+      throw new ApiError(`Insufficient balance. You need ${totalAmount} (including ${fee} fee) but have ${user.balance}`, 400, 'insufficient_balance');
+    }
+    
+    // Deduct amount from user balance
+    user.balance -= totalAmount;
+    await user.save({ session });
+    
+    // Create withdrawal transaction
+    const withdrawal = new Transaction({
+      user: user._id,
+      type: 'withdrawal',
+      amount: -parseFloat(amount),
+      fee,
+      currency,
+      method,
+      walletAddress,
+      bankDetails,
+      status: 'pending',
+      description: description || `Withdrawal via ${method}`,
+      createdAt: new Date()
+    });
+    
+    await withdrawal.save({ session });
+    
+    // Create fee transaction
+    const feeTransaction = new Transaction({
+      user: user._id,
+      type: 'fee',
+      amount: -fee,
+      currency,
+      method: 'system',
+      status: 'completed',
+      description: 'Withdrawal fee',
+      reference: withdrawal._id.toString(),
+      processedAt: new Date()
+    });
+    
+    await feeTransaction.save({ session });
+    
+    await session.commitTransaction();
+    
+    // Log the transaction
+    logger.info(`User ${req.user.email} created withdrawal request for ${amount} ${currency} via ${method}`);
+    
+    res.status(201).json({
+      success: true,
+      message: 'Withdrawal request created successfully',
+      data: withdrawal
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    logger.error('Error creating withdrawal:', error);
+    next(error);
+  } finally {
+    session.endSession();
+  }
+};
+
+// Cancel withdrawal request (only if pending)
+export const cancelWithdrawal = async (req, res, next) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  
+  try {
+    const { id } = req.params;
+    
+    const withdrawal = await Transaction.findOne({
+      _id: id,
+      user: req.user._id,
+      type: 'withdrawal',
+      status: 'pending'
+    }).session(session);
+    
+    if (!withdrawal) {
+      throw new ApiError('Pending withdrawal not found', 404, 'not_found');
+    }
+    
+    // Get the original amount and fee
+    const originalAmount = Math.abs(withdrawal.amount);
+    const fee = withdrawal.fee || 0;
+    
+    // Update withdrawal status
+    withdrawal.status = 'cancelled';
+    withdrawal.updatedAt = new Date();
+    
+    await withdrawal.save({ session });
+    
+    // Refund the amount to user's balance (excluding fee)
+    const user = await User.findById(req.user._id).session(session);
+    
+    if (!user) {
+      throw new ApiError('User not found', 404, 'not_found');
+    }
+    
+    user.balance += originalAmount;
+    await user.save({ session });
+    
+    // Create refund transaction
+    const refundTransaction = new Transaction({
+      user: user._id,
+      type: 'deposit',
+      amount: originalAmount,
+      currency: withdrawal.currency,
+      method: 'system',
+      status: 'completed',
+      description: 'Refund for cancelled withdrawal',
+      reference: withdrawal._id.toString(),
+      processedAt: new Date()
+    });
+    
+    await refundTransaction.save({ session });
+    
+    await session.commitTransaction();
+    
+    logger.info(`User ${req.user.email} cancelled withdrawal request ${id}, ${originalAmount} refunded`);
+    
+    res.status(200).json({
+      success: true,
+      message: 'Withdrawal request cancelled successfully and funds refunded',
+      data: withdrawal
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    logger.error(`Error cancelling withdrawal ${req.params.id}:`, error);
+    next(error);
+  } finally {
+    session.endSession();
+  }
+};
+
+// Get withdrawal methods (available withdrawal methods)
+export const getWithdrawalMethods = async (req, res, next) => {
+  try {
+    // These could be stored in a database in a real application
+    const withdrawalMethods = [
+      {
+        id: 'bank_transfer',
+        name: 'Bank Transfer',
+        description: 'Withdraw directly to your bank account',
+        processingTime: '1-3 business days',
+        minAmount: 100,
+        maxAmount: 50000,
+        fee: '1%',
+        status: 'active',
+        instructions: [
+          'Enter your bank account details',
+          'Confirm the withdrawal amount',
+          'Funds will be transferred within 1-3 business days'
+        ],
+        fields: [
+          { name: 'accountName', label: 'Account Holder Name', type: 'text', required: true },
+          { name: 'accountNumber', label: 'Account Number', type: 'text', required: true },
+          { name: 'bankName', label: 'Bank Name', type: 'text', required: true },
+          { name: 'routingNumber', label: 'Routing Number / SWIFT Code', type: 'text', required: true }
+        ]
+      },
+      {
+        id: 'cryptocurrency',
+        name: 'Cryptocurrency',
+        description: 'Withdraw via Bitcoin, Ethereum, or USDT',
+        processingTime: '10-60 minutes',
+        minAmount: 50,
+        maxAmount: 500000,
+        fee: '1%',
+        status: 'active',
+        instructions: [
+          'Select your preferred cryptocurrency',
+          'Enter your wallet address',
+          'Confirm the withdrawal amount'
+        ],
+        fields: [
+          { 
+            name: 'cryptoType', 
+            label: 'Cryptocurrency', 
+            type: 'select', 
+            required: true,
+            options: [
+              { value: 'BTC', label: 'Bitcoin (BTC)' },
+              { value: 'ETH', label: 'Ethereum (ETH)' },
+              { value: 'USDT', label: 'Tether (USDT)' }
+            ]
+          },
+          { name: 'walletAddress', label: 'Wallet Address', type: 'text', required: true }
+        ]
+      },
+      {
+        id: 'paypal',
+        name: 'PayPal',
+        description: 'Withdraw to your PayPal account',
+        processingTime: '1-24 hours',
+        minAmount: 10,
+        maxAmount: 10000,
+        fee: '1%',
+        status: 'active',
+        instructions: [
+          'Enter your PayPal email address',
+          'Confirm the withdrawal amount',
+          'Funds will be sent to your PayPal account'
+        ],
+        fields: [
+          { name: 'paypalEmail', label: 'PayPal Email', type: 'email', required: true }
+        ]
+      }
+    ];
+    
+    res.status(200).json({
+      success: true,
+      data: withdrawalMethods
+    });
+  } catch (error) {
+    logger.error('Error fetching withdrawal methods:', error);
+    next(error);
+  }
+};
+
+// Get withdrawal statistics for the user
+export const getWithdrawalStats = async (req, res, next) => {
+  try {
+    // Total withdrawals
+    const totalWithdrawals = await Transaction.countDocuments({ 
+      user: req.user._id,
+      type: 'withdrawal'
+    });
+    
+    // Pending withdrawals
+    const pendingWithdrawals = await Transaction.countDocuments({ 
+      user: req.user._id,
+      type: 'withdrawal',
+      status: 'pending'
+    });
+    
+    // Completed withdrawals
+    const completedWithdrawals = await Transaction.countDocuments({ 
+      user: req.user._id,
+      type: 'withdrawal',
+      status: 'completed'
+    });
+    
+    // Total withdrawal amount
+    const withdrawalVolume = await Transaction.aggregate([
+      { 
+        $match: { 
+          user: new mongoose.Types.ObjectId(req.user._id),
+          type: 'withdrawal',
+          status: 'completed'
+        } 
+      },
+      { 
+        $group: { 
+          _id: null, 
+          total: { $sum: { $abs: '$amount' } } 
+        } 
+      }
+    ]);
+    
+    // Recent withdrawals
+    const recentWithdrawals = await Transaction.find({
+      user: req.user._id,
+      type: 'withdrawal'
+    })
+    .sort({ createdAt: -1 })
+    .limit(5);
+    
+    res.status(200).json({
+      success: true,
+      data: {
+        total: totalWithdrawals,
+        pending: pendingWithdrawals,
+        completed: completedWithdrawals,
+        volume: withdrawalVolume[0]?.total || 0,
+        recent: recentWithdrawals
+      }
+    });
+  } catch (error) {
+    logger.error('Error fetching withdrawal statistics:', error);
+    next(error);
+  }
+};
+
+export default {
+  getUserWithdrawals,
+  getWithdrawalById,
+  createWithdrawal,
+  cancelWithdrawal,
+  getWithdrawalMethods,
+  getWithdrawalStats
+};

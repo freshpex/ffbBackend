@@ -8,6 +8,38 @@ import { asyncHandler } from '../middleware/errorHandler.js';
 import logger from '../middleware/logger.js';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import {
+  getAllTransactions,
+  getTransactionById,
+  processTransaction,
+  getTransactionStats
+} from '../controllers/AdminTransactionController.js';
+import {
+  getAllUsers,
+  getUserById,
+  createUser,
+  updateUser,
+  deleteUser,
+  getUserStats
+} from '../controllers/AdminUserController.js';
+import {
+  getAllKycRequests,
+  getKycRequestById,
+  approveKycRequest,
+  rejectKycRequest,
+  getKycStats
+} from '../controllers/AdminKycController.js';
+import {
+  getAdminNotifications,
+  getNotificationById,
+  markNotificationAsRead,
+  markAllNotificationsAsRead,
+  deleteNotification,
+  createSystemNotification,
+  getNotificationStats
+} from '../controllers/AdminNotificationController.js';
+import AdminProfileController from '../controllers/AdminProfileController.js';
+import AdminSettingsController from '../controllers/AdminSettingsController.js';
 
 const router = express.Router();
 
@@ -100,6 +132,26 @@ router.get('/verify-token', (req, res, next) => {
     next(error);
   }
 });
+
+// === Admin User Management Routes ===
+
+// Get all users with filtering and pagination
+router.get('/users', requireAdmin, asyncHandler(getAllUsers));
+
+// Get user statistics 
+router.get('/users/stats', requireAdmin, asyncHandler(getUserStats));
+
+// Create a new user
+router.post('/users', requireAdmin, asyncHandler(createUser));
+
+// Get user by ID
+router.get('/users/:id', requireAdmin, asyncHandler(getUserById));
+
+// Update user
+router.put('/users/:id', requireAdmin, asyncHandler(updateUser));
+
+// Delete user
+router.delete('/users/:id', requireSuperAdmin, asyncHandler(deleteUser));
 
 // Get all users (admin only)
 router.get('/users', requireAdmin, asyncHandler(async (req, res) => {
@@ -310,5 +362,76 @@ router.put('/kyc/:userId', requireAdmin, asyncHandler(async (req, res) => {
     }
   });
 }));
+
+// === Admin KYC Routes ===
+
+// Get all KYC requests
+router.get('/kyc', requireAdmin, asyncHandler(getAllKycRequests));
+
+// Get KYC statistics
+router.get('/kyc/stats', requireAdmin, asyncHandler(getKycStats));
+
+// Get KYC request by ID
+router.get('/kyc/:id', requireAdmin, asyncHandler(getKycRequestById));
+
+// Approve KYC request
+router.put('/kyc/:id/approve', requireAdmin, asyncHandler(approveKycRequest));
+
+// Reject KYC request
+router.put('/kyc/:id/reject', requireAdmin, asyncHandler(rejectKycRequest));
+
+// === Admin Transaction Routes ===
+
+// Get all transactions with filtering and pagination
+router.get('/transactions', requireAdmin, asyncHandler(getAllTransactions));
+
+// Get transaction stats
+router.get('/transactions/stats', requireAdmin, asyncHandler(getTransactionStats));
+
+// Get transaction by ID
+router.get('/transactions/:id', requireAdmin, asyncHandler(getTransactionById));
+
+// Process transaction (approve or reject)
+router.put('/transactions/:id/process', requireAdmin, asyncHandler(processTransaction));
+
+// === Admin Notification Routes ===
+
+// Get all admin notifications
+router.get('/notifications', requireAdmin, asyncHandler(getAdminNotifications));
+
+// Get notification statistics
+router.get('/notifications/stats', requireAdmin, asyncHandler(getNotificationStats));
+
+// Mark all notifications as read
+router.put('/notifications/mark-all-read', requireAdmin, asyncHandler(markAllNotificationsAsRead));
+
+// Create system notification for all admins
+router.post('/notifications/system', requireAdmin, asyncHandler(createSystemNotification));
+
+// Get notification by ID
+router.get('/notifications/:id', requireAdmin, asyncHandler(getNotificationById));
+
+// Mark notification as read
+router.put('/notifications/:id/read', requireAdmin, asyncHandler(markNotificationAsRead));
+
+// Delete notification
+router.delete('/notifications/:id', requireAdmin, asyncHandler(deleteNotification));
+
+// Admin Profile routes
+router.get('/profile', asyncHandler(AdminProfileController.getAdminProfile));
+router.put('/profile', asyncHandler(AdminProfileController.updateAdminProfile));
+router.post('/profile/image', AdminProfileController.upload.single('image'), asyncHandler(AdminProfileController.uploadAdminProfileImage));
+router.put('/profile/password', asyncHandler(AdminProfileController.changeAdminPassword));
+router.get('/profile/preferences', asyncHandler(AdminProfileController.getAdminPreferences));
+router.put('/profile/preferences', asyncHandler(AdminProfileController.updateAdminPreferences));
+
+// System Settings routes
+router.get('/settings', asyncHandler(AdminSettingsController.getAllSettings));
+router.get('/settings/category/:category', asyncHandler(AdminSettingsController.getSettingsByCategory));
+router.get('/settings/:key', asyncHandler(AdminSettingsController.getSettingByKey));
+router.put('/settings', asyncHandler(AdminSettingsController.updateSettings));
+router.post('/settings', asyncHandler(AdminSettingsController.createSetting));
+router.delete('/settings/:key', asyncHandler(AdminSettingsController.deleteSetting));
+router.post('/settings/reset', asyncHandler(AdminSettingsController.resetToDefaults));
 
 export default router;
