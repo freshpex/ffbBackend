@@ -55,6 +55,11 @@ const kycDocumentSchema = new mongoose.Schema({
 });
 
 const userSchema = new mongoose.Schema({
+  uid: {
+    type: String,
+    unique: true,
+    sparse: true
+  },
   email: {
     type: String,
     required: true,
@@ -114,7 +119,46 @@ const userSchema = new mongoose.Schema({
   phone: {
     type: String
   },
+  phoneNumber: {
+    type: String
+  },
   country: {
+    type: String
+  },
+  dateOfBirth: {
+    type: Date
+  },
+  occupation: {
+    type: String
+  },
+  accountType: {
+    type: String,
+    enum: ['individual', 'corporate', 'joint', 'retirement'],
+    default: 'individual'
+  },
+  address: {
+    street: {
+      type: String
+    },
+    city: {
+      type: String
+    },
+    postalCode: {
+      type: String
+    },
+    country: {
+      type: String
+    }
+  },
+  taxId: {
+    type: String
+  },
+  experienceLevel: {
+    type: String,
+    enum: ['beginner', 'intermediate', 'advanced', 'professional'],
+    default: 'beginner'
+  },
+  howDidYouHearAboutUs: {
     type: String
   },
   tradingEnabled: {
