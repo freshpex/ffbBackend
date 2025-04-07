@@ -43,23 +43,99 @@ export const upload = multer({
   fileFilter: fileFilter
 });
 
-// Get user profile
-export const getUserProfile = async (req, res, next) => {
+
+export const getUserProfile = async (req, res) => {
   try {
-    const userId = req.user._id;
+    const userId = req.user.id;
     
-    const user = await User.findById(userId).select('-password -resetToken -resetTokenExpiry');
+    const user = await User.findById(userId)
+      .select('-password -__v -refreshToken')
+      .lean();
     
     if (!user) {
-      throw new ApiError('User not found', 404);
+      return res.status(404).json({ 
+        success: false, 
+        message: 'User not found' 
+      });
     }
+    
+    return res.status(200).json({
+      success: true,
+      data: {
+        id: user._id,
+        email: user.email || '',
+        username: user.username || '',
+        firstName: user.firstName || '',
+        lastName: user.lastName || '',
+        profileImage: user.profileImage || '',
+        phone: user.phone || '',
+        address: user.address || '',
+        accountBalance: user.accountBalance || 0,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching user profile:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+};
+
+// Get user account summary (may include balance, investments, etc)
+export const getAccountSummary = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+
+    // Get user data
+    const user = await User.findById(userId).select('-password');
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+    
+    // Get investments count and total
+    const investments = await Investment.find({ user: userId });
+    const investmentTotal = investments.reduce((sum, inv) => sum + inv.amount, 0);
+    
+    // Get transaction stats
+    const deposits = await Transaction.find({ 
+      user: userId, 
+      type: 'deposit',
+      status: 'completed'
+    });
+    const withdrawals = await Transaction.find({ 
+      user: userId, 
+      type: 'withdrawal',
+      status: 'completed'
+    });
+    
+    const depositTotal = deposits.reduce((sum, dep) => sum + dep.amount, 0);
+    const withdrawalTotal = withdrawals.reduce((sum, wit) => sum + wit.amount, 0);
+    
+    // Create summary object
+    const summary = {
+      balance: user.balance || 0,
+      investmentCount: investments.length,
+      investmentTotal,
+      depositTotal,
+      withdrawalTotal,
+      lastLogin: user.lastLoginAt,
+      accountStatus: user.status,
+      kycVerified: user.kycVerified
+    };
     
     res.status(200).json({
       success: true,
-      data: user
+      data: summary
     });
   } catch (error) {
-logger.error('Error fetching user profile:', error);
     next(error);
   }
 };
@@ -140,9 +216,37 @@ export const uploadProfileImage = async (req, res, next) => {
   }
 };
 
+// Add a new controller method to get user balance
+export const getUserBalance = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+
+    // Fetch user data including the balance
+    const user = await User.findById(userId).select('balance');
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+    
+    res.status(200).json({
+      success: true,
+      data: {
+        balance: user.balance || 0
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export default {
   upload,
   getUserProfile,
   updateUserProfile,
-  uploadProfileImage
+  uploadProfileImage,
+  getUserBalance,
+  getAccountSummary
 };

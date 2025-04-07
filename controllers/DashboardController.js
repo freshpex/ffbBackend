@@ -89,43 +89,35 @@ export const getAccountSummary = async (req, res, next) => {
 // Get recent transactions for dashboard
 export const getRecentTransactions = async (req, res, next) => {
   try {
+    const userId = req.user.id;
     const { limit = 5 } = req.query;
     
-    const transactions = await Transaction.find({ user: req.user._id })
+    const transactions = await Transaction.find({ user: userId })
       .sort({ createdAt: -1 })
-      .limit(parseInt(limit));
+      .limit(parseInt(limit))
+      .populate('user', 'firstName lastName email');
     
     res.status(200).json({
       success: true,
       data: transactions
     });
   } catch (error) {
-    logger.error('Error fetching recent transactions:', error);
     next(error);
   }
 };
 
-// Get financial highlights
+// Get financial highlights for dashboard
 export const getFinancialHighlights = async (req, res, next) => {
   try {
-    const user = await User.findById(req.user._id);
+    const userId = req.user.id;
     
-    if (!user) {
-      throw new ApiError('User not found', 404, 'not_found');
-    }
-    
-    // Calculate month-to-date statistics
-    const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    
-    // Get deposits this month
-    const depositsThisMonth = await Transaction.aggregate([
+    // Get deposit total
+    const depositTotal = await Transaction.aggregate([
       {
         $match: {
-          user: new mongoose.Types.ObjectId(user._id),
+          user: new mongoose.Types.ObjectId(userId),
           type: 'deposit',
-          status: 'completed',
-          createdAt: { $gte: startOfMonth }
+          status: 'completed'
         }
       },
       {
@@ -136,14 +128,13 @@ export const getFinancialHighlights = async (req, res, next) => {
       }
     ]);
     
-    // Get withdrawals this month
-    const withdrawalsThisMonth = await Transaction.aggregate([
+    // Get withdrawal total
+    const withdrawalTotal = await Transaction.aggregate([
       {
         $match: {
-          user: new mongoose.Types.ObjectId(user._id),
+          user: new mongoose.Types.ObjectId(userId),
           type: 'withdrawal',
-          status: 'completed',
-          createdAt: { $gte: startOfMonth }
+          status: 'completed'
         }
       },
       {
@@ -153,53 +144,23 @@ export const getFinancialHighlights = async (req, res, next) => {
         }
       }
     ]);
+    
+    // Get investment stats
+    const investments = await Investment.find({ user: userId });
+    const activeInvestments = investments.filter(inv => inv.status === 'active');
     
     // Calculate profit/loss
-    const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+    const investmentTotal = investments.reduce((sum, inv) => sum + inv.amount, 0);
+    const totalReturns = investments.reduce((sum, inv) => sum + (inv.returns || 0), 0);
     
-    // Get previous month's transactions (for comparison)
-    const lastMonthTransactions = await Transaction.aggregate([
-      {
-        $match: {
-          user: new mongoose.Types.ObjectId(user._id),
-          status: 'completed',
-          createdAt: { 
-            $gte: startOfLastMonth,
-            $lte: endOfLastMonth
-          }
-        }
-      },
-      {
-        $group: {
-          _id: '$type',
-          total: { $sum: '$amount' }
-        }
-      }
-    ]);
-    
-    // Process last month's data
-    const lastMonthData = {};
-    lastMonthTransactions.forEach(item => {
-      lastMonthData[item._id] = item.total;
-    });
-    
-    // Calculate trends (comparing to last month)
-    const depositTrend = lastMonthData.deposit ? 
-      ((depositsThisMonth[0]?.total || 0) - lastMonthData.deposit) / lastMonthData.deposit * 100 : 0;
-    
-    const withdrawalTrend = lastMonthData.withdrawal ? 
-      ((withdrawalsThisMonth[0]?.total || 0) - lastMonthData.withdrawal) / lastMonthData.withdrawal * 100 : 0;
-    
-    // Create response data
     const highlights = {
-      monthToDateDeposits: depositsThisMonth[0]?.total || 0,
-      monthToDateWithdrawals: withdrawalsThisMonth[0]?.total || 0,
-      netFlow: (depositsThisMonth[0]?.total || 0) - (withdrawalsThisMonth[0]?.total || 0),
-      depositTrend: parseFloat(depositTrend.toFixed(2)),
-      withdrawalTrend: parseFloat(withdrawalTrend.toFixed(2)),
-      currency: 'USD',
-      periodLabel: `${now.toLocaleString('default', { month: 'long' })} ${now.getFullYear()}`
+      depositTotal: depositTotal.length > 0 ? depositTotal[0].total : 0,
+      withdrawalTotal: withdrawalTotal.length > 0 ? withdrawalTotal[0].total : 0,
+      investmentTotal,
+      totalReturns,
+      activeInvestments: activeInvestments.length,
+      profitLoss: totalReturns - investmentTotal,
+      profitPercentage: investmentTotal > 0 ? ((totalReturns - investmentTotal) / investmentTotal) * 100 : 0
     };
     
     res.status(200).json({
@@ -207,151 +168,65 @@ export const getFinancialHighlights = async (req, res, next) => {
       data: highlights
     });
   } catch (error) {
-    logger.error('Error fetching financial highlights:', error);
     next(error);
   }
 };
 
-// Get market pulse data
-export const getMarketPulse = async (req, res, next) => {
+// Get market overview data
+export const getMarketOverview = async (req, res, next) => {
   try {
-    // In a real application, this would fetch real-time market data
-    // For demonstration, we'll return simulated market data
-    
-    // Sample market indices
-    const indices = [
-      {
-        name: 'S&P 500',
-        symbol: 'SPX',
-        price: 4500 + (Math.random() * 100 - 50),
-        change: (Math.random() * 2 - 1).toFixed(2),
-        percentChange: (Math.random() * 4 - 2).toFixed(2)
-      },
-      {
-        name: 'Dow Jones',
-        symbol: 'DJI',
-        price: 35000 + (Math.random() * 500 - 250),
-        change: (Math.random() * 100 - 50).toFixed(2),
-        percentChange: (Math.random() * 3 - 1.5).toFixed(2)
-      },
-      {
-        name: 'Nasdaq',
-        symbol: 'IXIC',
-        price: 14000 + (Math.random() * 200 - 100),
-        change: (Math.random() * 50 - 25).toFixed(2),
-        percentChange: (Math.random() * 3.5 - 1.75).toFixed(2)
-      },
-      {
-        name: 'Russell 2000',
-        symbol: 'RUT',
-        price: 2200 + (Math.random() * 50 - 25),
-        change: (Math.random() * 15 - 7.5).toFixed(2),
-        percentChange: (Math.random() * 3 - 1.5).toFixed(2)
-      }
-    ];
-    
-    // Sample trending assets
-    const trendingAssets = [
-      {
-        name: 'Bitcoin',
-        symbol: 'BTC/USD',
-        price: 50000 + (Math.random() * 5000 - 2500),
-        change: (Math.random() * 1000 - 500).toFixed(2),
-        percentChange: (Math.random() * 8 - 4).toFixed(2)
-      },
-      {
-        name: 'Ethereum',
-        symbol: 'ETH/USD',
-        price: 3000 + (Math.random() * 300 - 150),
-        change: (Math.random() * 100 - 50).toFixed(2),
-        percentChange: (Math.random() * 10 - 5).toFixed(2)
-      },
-      {
-        name: 'Apple Inc.',
-        symbol: 'AAPL',
-        price: 150 + (Math.random() * 10 - 5),
-        change: (Math.random() * 2 - 1).toFixed(2),
-        percentChange: (Math.random() * 3 - 1.5).toFixed(2)
-      },
-      {
-        name: 'Tesla Inc.',
-        symbol: 'TSLA',
-        price: 750 + (Math.random() * 50 - 25),
-        change: (Math.random() * 15 - 7.5).toFixed(2),
-        percentChange: (Math.random() * 5 - 2.5).toFixed(2)
-      }
-    ];
-    
-    // Market movers (biggest gainers and losers)
-    const marketMovers = {
-      gainers: [
-        {
-          name: 'Growth Tech Co',
-          symbol: 'GTCH',
-          price: 75.25 + (Math.random() * 5),
-          change: (3 + Math.random() * 2).toFixed(2),
-          percentChange: (5 + Math.random() * 10).toFixed(2)
-        },
-        {
-          name: 'BioPharm Inc',
-          symbol: 'BPHM',
-          price: 120.80 + (Math.random() * 10),
-          change: (4 + Math.random() * 3).toFixed(2),
-          percentChange: (4 + Math.random() * 8).toFixed(2)
-        },
-        {
-          name: 'Clean Energy Ltd',
-          symbol: 'CLEN',
-          price: 45.60 + (Math.random() * 3),
-          change: (2 + Math.random()).toFixed(2),
-          percentChange: (3 + Math.random() * 5).toFixed(2)
-        }
+    // Fetch market data from external API or database
+    const marketData = {
+      indices: [
+        { name: 'S&P 500', value: 4580.25, change: 0.85, changePercent: 1.2 },
+        { name: 'Dow Jones', value: 36240.75, change: 145.8, changePercent: 0.4 },
+        { name: 'Nasdaq', value: 14350.50, change: -28.6, changePercent: -0.2 },
+        { name: 'Bitcoin', value: 48750.32, change: 1250.8, changePercent: 2.8 },
+        { name: 'Ethereum', value: 3290.15, change: 85.4, changePercent: 2.6 }
       ],
-      losers: [
-        {
-          name: 'Retail Chain Co',
-          symbol: 'RETL',
-          price: 30.40 - (Math.random() * 3),
-          change: (-3 - Math.random() * 2).toFixed(2),
-          percentChange: (-5 - Math.random() * 5).toFixed(2)
-        },
-        {
-          name: 'Industrial Supplies',
-          symbol: 'INDS',
-          price: 85.20 - (Math.random() * 5),
-          change: (-4 - Math.random() * 3).toFixed(2),
-          percentChange: (-4 - Math.random() * 6).toFixed(2)
-        },
-        {
-          name: 'Travel & Leisure Corp',
-          symbol: 'TRVL',
-          price: 55.70 - (Math.random() * 4),
-          change: (-2 - Math.random() * 2).toFixed(2),
-          percentChange: (-3 - Math.random() * 4).toFixed(2)
-        }
+      currencies: [
+        { pair: 'EUR/USD', value: 1.0825, change: 0.0015, changePercent: 0.14 },
+        { pair: 'GBP/USD', value: 1.2650, change: -0.0032, changePercent: -0.25 },
+        { pair: 'USD/JPY', value: 145.82, change: 0.76, changePercent: 0.52 }
+      ],
+      commodities: [
+        { name: 'Gold', value: 2080.50, change: 12.8, changePercent: 0.62 },
+        { name: 'Silver', value: 24.15, change: 0.35, changePercent: 1.45 },
+        { name: 'Oil (WTI)', value: 75.30, change: -1.25, changePercent: -1.63 }
       ]
     };
     
-    // Market sentiment indicators
-    const marketSentiment = {
-      fearGreedIndex: Math.floor(Math.random() * 100),
-      volatilityIndex: 15 + Math.floor(Math.random() * 30),
-      marketBreadth: {
-        advancing: 1800 + Math.floor(Math.random() * 600),
-        declining: 1200 + Math.floor(Math.random() * 600),
-        unchanged: 100 + Math.floor(Math.random() * 50)
-      },
-      tradingVolume: (Math.random() * 2 + 0.8).toFixed(2) + 'B',
-      sentiment: ['bearish', 'neutral', 'bullish'][Math.floor(Math.random() * 3)]
-    };
-    
-    // Assemble market pulse data
+    res.status(200).json({
+      success: true,
+      data: marketData
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Get market pulse data (trends, sentiment, etc)
+export const getMarketPulse = async (req, res, next) => {
+  try {
+    // Mock data for market pulse (in real app, fetch from API)
     const marketPulse = {
-      indices,
-      trendingAssets,
-      marketMovers,
-      marketSentiment,
-      lastUpdated: new Date()
+      sentiment: {
+        overall: 'bullish',
+        score: 65,
+        change: 5
+      },
+      trends: [
+        { sector: 'Technology', sentiment: 'bullish', strength: 72 },
+        { sector: 'Finance', sentiment: 'neutral', strength: 52 },
+        { sector: 'Healthcare', sentiment: 'bullish', strength: 68 },
+        { sector: 'Energy', sentiment: 'bearish', strength: 35 },
+        { sector: 'Consumer Goods', sentiment: 'neutral', strength: 48 }
+      ],
+      volatilityIndex: 18.5,
+      marketCap: {
+        total: 52.8, // in trillion $
+        change: 1.2 // percentage
+      }
     };
     
     res.status(200).json({
@@ -359,7 +234,70 @@ export const getMarketPulse = async (req, res, next) => {
       data: marketPulse
     });
   } catch (error) {
-    logger.error('Error generating market pulse data:', error);
+    next(error);
+  }
+};
+
+// Get market news
+export const getMarketNews = async (req, res, next) => {
+  try {
+    const { limit = 5 } = req.query;
+    
+    // Fetch news from database or external API
+    // Mock data for demonstration
+    const news = [
+      {
+        id: '1',
+        title: 'Fed signals potential rate cuts as inflation eases',
+        summary: 'Federal Reserve hints at possible interest rate reductions in the coming months as inflation shows signs of cooling.',
+        source: 'Financial Times',
+        imageUrl: 'https://example.com/news1.jpg',
+        url: 'https://example.com/news/1',
+        publishedAt: new Date(Date.now() - 3600000)
+      },
+      {
+        id: '2',
+        title: 'Tech stocks rally on strong earnings reports',
+        summary: 'Major technology companies exceed quarterly earnings expectations, driving market gains.',
+        source: 'Bloomberg',
+        imageUrl: 'https://example.com/news2.jpg',
+        url: 'https://example.com/news/2',
+        publishedAt: new Date(Date.now() - 7200000)
+      },
+      {
+        id: '3',
+        title: 'Oil prices drop on increased supply concerns',
+        summary: 'Crude oil futures fell as OPEC+ considers production increases amid global economic uncertainty.',
+        source: 'Reuters',
+        imageUrl: 'https://example.com/news3.jpg',
+        url: 'https://example.com/news/3',
+        publishedAt: new Date(Date.now() - 10800000)
+      },
+      {
+        id: '4',
+        title: 'Cryptocurrency market sees renewed institutional interest',
+        summary: 'Major financial institutions announce new crypto investment products as regulatory clarity improves.',
+        source: 'CoinDesk',
+        imageUrl: 'https://example.com/news4.jpg',
+        url: 'https://example.com/news/4',
+        publishedAt: new Date(Date.now() - 14400000)
+      },
+      {
+        id: '5',
+        title: 'Housing market shows signs of cooling after record surge',
+        summary: 'Home prices begin to stabilize following unprecedented growth during the pandemic.',
+        source: 'Wall Street Journal',
+        imageUrl: 'https://example.com/news5.jpg',
+        url: 'https://example.com/news/5',
+        publishedAt: new Date(Date.now() - 18000000)
+      }
+    ];
+    
+    res.status(200).json({
+      success: true,
+      data: news.slice(0, parseInt(limit))
+    });
+  } catch (error) {
     next(error);
   }
 };
@@ -427,10 +365,229 @@ export const getDashboardData = async (req, res, next) => {
   }
 };
 
+// Get combined dashboard overview data
+export const getDashboardOverview = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    
+    // Get user data
+    const user = await User.findById(userId).select('-password');
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+    
+    // Run multiple queries in parallel for better performance
+    const [
+      accountSummary,
+      recentTransactions,
+      financialHighlights,
+      marketOverview,
+      marketPulse,
+      recentNews
+    ] = await Promise.all([
+      // Get account summary
+      (async () => {
+        // Get investments count and total
+        const investments = await Investment.find({ user: userId });
+        const investmentTotal = investments.reduce((sum, inv) => sum + inv.amount, 0);
+        
+        // Get transaction stats
+        const deposits = await Transaction.find({ 
+          user: userId, 
+          type: 'deposit',
+          status: 'completed'
+        });
+        const withdrawals = await Transaction.find({ 
+          user: userId, 
+          type: 'withdrawal',
+          status: 'completed'
+        });
+        
+        const depositTotal = deposits.reduce((sum, dep) => sum + dep.amount, 0);
+        const withdrawalTotal = withdrawals.reduce((sum, wit) => sum + wit.amount, 0);
+        
+        return {
+          balance: user.balance || 0,
+          investmentCount: investments.length,
+          investmentTotal,
+          depositTotal,
+          withdrawalTotal,
+          lastLogin: user.lastLoginAt,
+          accountStatus: user.status,
+          kycVerified: user.kycVerified
+        };
+      })(),
+      
+      // Get recent transactions
+      Transaction.find({ user: userId })
+        .sort({ createdAt: -1 })
+        .limit(5),
+      
+      // Get financial highlights (reuse existing function logic)
+      (async () => {
+        // Get deposit total
+        const depositTotal = await Transaction.aggregate([
+          {
+            $match: {
+              user: new mongoose.Types.ObjectId(userId),
+              type: 'deposit',
+              status: 'completed'
+            }
+          },
+          {
+            $group: {
+              _id: null,
+              total: { $sum: '$amount' }
+            }
+          }
+        ]);
+        
+        // Get withdrawal total
+        const withdrawalTotal = await Transaction.aggregate([
+          {
+            $match: {
+              user: new mongoose.Types.ObjectId(userId),
+              type: 'withdrawal',
+              status: 'completed'
+            }
+          },
+          {
+            $group: {
+              _id: null,
+              total: { $sum: '$amount' }
+            }
+          }
+        ]);
+        
+        // Get investment stats
+        const investments = await Investment.find({ user: userId });
+        const activeInvestments = investments.filter(inv => inv.status === 'active');
+        
+        // Calculate profit/loss
+        const investmentTotal = investments.reduce((sum, inv) => sum + inv.amount, 0);
+        const totalReturns = investments.reduce((sum, inv) => sum + (inv.returns || 0), 0);
+        
+        return {
+          depositTotal: depositTotal.length > 0 ? depositTotal[0].total : 0,
+          withdrawalTotal: withdrawalTotal.length > 0 ? withdrawalTotal[0].total : 0,
+          investmentTotal,
+          totalReturns,
+          activeInvestments: activeInvestments.length,
+          profitLoss: totalReturns - investmentTotal,
+          profitPercentage: investmentTotal > 0 ? ((totalReturns - investmentTotal) / investmentTotal) * 100 : 0
+        };
+      })(),
+      
+      // Get market overview data (reuse existing function logic)
+      (async () => {
+        return {
+          indices: [
+            { name: 'S&P 500', value: 4580.25, change: 0.85, changePercent: 1.2 },
+            { name: 'Dow Jones', value: 36240.75, change: 145.8, changePercent: 0.4 },
+            { name: 'Nasdaq', value: 14350.50, change: -28.6, changePercent: -0.2 },
+            { name: 'Bitcoin', value: 48750.32, change: 1250.8, changePercent: 2.8 },
+            { name: 'Ethereum', value: 3290.15, change: 85.4, changePercent: 2.6 }
+          ],
+          currencies: [
+            { pair: 'EUR/USD', value: 1.0825, change: 0.0015, changePercent: 0.14 },
+            { pair: 'GBP/USD', value: 1.2650, change: -0.0032, changePercent: -0.25 },
+            { pair: 'USD/JPY', value: 145.82, change: 0.76, changePercent: 0.52 }
+          ],
+          commodities: [
+            { name: 'Gold', value: 2080.50, change: 12.8, changePercent: 0.62 },
+            { name: 'Silver', value: 24.15, change: 0.35, changePercent: 1.45 },
+            { name: 'Oil (WTI)', value: 75.30, change: -1.25, changePercent: -1.63 }
+          ]
+        };
+      })(),
+      
+      // Get market pulse data (reuse existing function logic)
+      (async () => {
+        return {
+          sentiment: {
+            overall: 'bullish',
+            score: 65,
+            change: 5
+          },
+          trends: [
+            { sector: 'Technology', sentiment: 'bullish', strength: 72 },
+            { sector: 'Finance', sentiment: 'neutral', strength: 52 },
+            { sector: 'Healthcare', sentiment: 'bullish', strength: 68 },
+            { sector: 'Energy', sentiment: 'bearish', strength: 35 },
+            { sector: 'Consumer Goods', sentiment: 'neutral', strength: 48 }
+          ],
+          volatilityIndex: 18.5,
+          marketCap: {
+            total: 52.8, // in trillion $
+            change: 1.2 // percentage
+          }
+        };
+      })(),
+      
+      // Get market news (reuse existing function logic)
+      (async () => {
+        return [
+          {
+            id: '1',
+            title: 'Fed signals potential rate cuts as inflation eases',
+            summary: 'Federal Reserve hints at possible interest rate reductions in the coming months as inflation shows signs of cooling.',
+            source: 'Financial Times',
+            imageUrl: 'https://example.com/news1.jpg',
+            url: 'https://example.com/news/1',
+            publishedAt: new Date(Date.now() - 3600000)
+          },
+          {
+            id: '2',
+            title: 'Tech stocks rally on strong earnings reports',
+            summary: 'Major technology companies exceed quarterly earnings expectations, driving market gains.',
+            source: 'Bloomberg',
+            imageUrl: 'https://example.com/news2.jpg',
+            url: 'https://example.com/news/2',
+            publishedAt: new Date(Date.now() - 7200000)
+          },
+          {
+            id: '3',
+            title: 'Oil prices drop on increased supply concerns',
+            summary: 'Crude oil futures fell as OPEC+ considers production increases amid global economic uncertainty.',
+            source: 'Reuters',
+            imageUrl: 'https://example.com/news3.jpg',
+            url: 'https://example.com/news/3',
+            publishedAt: new Date(Date.now() - 10800000)
+          }
+        ];
+      })()
+    ]);
+    
+    // Combine all data into a single response
+    const dashboardData = {
+      accountSummary,
+      recentTransactions,
+      financialHighlights,
+      marketOverview,
+      marketPulse,
+      recentNews
+    };
+    
+    res.status(200).json({
+      success: true,
+      data: dashboardData
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export default {
   getAccountSummary,
   getRecentTransactions,
   getFinancialHighlights,
   getMarketPulse,
-  getDashboardData
+  getDashboardData,
+  getMarketOverview,
+  getMarketNews,
+  getDashboardOverview
 };

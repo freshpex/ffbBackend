@@ -3,6 +3,7 @@ import User from '../models/User.js';
 import mongoose from 'mongoose';
 import logger from '../middleware/logger.js';
 import { ApiError } from '../middleware/errorHandler.js';
+const { createTransactionNotification } = require('../services/notificationService');
 
 // Get all transactions with filtering and pagination
 export const getAllTransactions = async (req, res, next) => {
@@ -128,20 +129,22 @@ export const processTransaction = async (req, res, next) => {
       }
       
       if (transaction.type === 'deposit') {
-        // For deposits, add the amount to user's balance
         user.balance += Math.abs(transaction.amount);
+        await createTransactionNotification(deposit, req.user);
+        await createTransactionNotification(deposit, user);
         logger.info(`Admin ${req.user.email} approved deposit of ${Math.abs(transaction.amount)} for user ${user.email}`);
       } 
       else if (transaction.type === 'withdrawal') {
         // For withdrawals, the balance was already deducted when request was created
         // No need to deduct again, just log
+        await createTransactionNotification(withdrawal, req.user);
+        await createTransactionNotification(withdrawal, user);
         logger.info(`Admin ${req.user.email} approved withdrawal of ${Math.abs(transaction.amount)} for user ${user.email}`);
       }
       
       await user.save({ session });
     } 
     else if (action === 'reject' && transaction.type === 'withdrawal') {
-      // If rejecting a withdrawal, refund the amount back to user's balance
       const user = await User.findById(transaction.user).session(session);
       
       if (!user) {

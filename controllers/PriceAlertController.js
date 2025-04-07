@@ -1,173 +1,119 @@
 import PriceAlert from '../models/PriceAlert.js';
-import logger from '../middleware/logger.js';
 import { ApiError } from '../middleware/errorHandler.js';
 
-// Get all price alerts for current user
-export const getUserAlerts = async (req, res, next) => {
+// Get user price alerts
+export const getUserPriceAlerts = async (req, res, next) => {
   try {
-    const { page = 1, limit = 10, active } = req.query;
+    const userId = req.user.id;
     
-    const query = { user: req.user._id };
-    
-    // Add active filter if specified
-    if (active !== undefined) {
-      query.active = active === 'true';
-    }
-    
-    // Execute query with pagination
-    const total = await PriceAlert.countDocuments(query);
-    const alerts = await PriceAlert.find(query)
-      .sort({ createdAt: -1 })
-      .skip((parseInt(page) - 1) * parseInt(limit))
-      .limit(parseInt(limit));
+    const alerts = await PriceAlert.find({ user: userId }).sort({ createdAt: -1 });
     
     res.status(200).json({
       success: true,
-      data: {
-        alerts,
-        pagination: {
-          total,
-          page: parseInt(page),
-          limit: parseInt(limit),
-          pages: Math.ceil(total / parseInt(limit))
-        }
-      }
+      data: alerts
     });
   } catch (error) {
-    logger.error('Error fetching price alerts:', error);
     next(error);
   }
 };
 
-// Create new price alert
-export const createAlert = async (req, res, next) => {
+// Create price alert
+export const createPriceAlert = async (req, res, next) => {
   try {
-    const { symbol, condition, price, repeatable } = req.body;
+    const userId = req.user.id;
+    const { symbol, targetPrice, direction, notificationType } = req.body;
     
-    // Validate required fields
-    if (!symbol || !condition || price === undefined) {
-      throw new ApiError('Symbol, condition, and price are required', 400, 'validation_error');
+    // Validation
+    if (!symbol || !targetPrice || !direction) {
+      throw new ApiError('Missing required fields', 400);
     }
     
-    // Validate condition
-    if (!['above', 'below'].includes(condition)) {
-      throw new ApiError('Condition must be either "above" or "below"', 400, 'validation_error');
-    }
-    
-    // Validate price
-    if (typeof price !== 'number' || price <= 0) {
-      throw new ApiError('Price must be a positive number', 400, 'validation_error');
-    }
-    
-    // Create new alert
-    const alert = new PriceAlert({
-      user: req.user._id,
+    // Create alert
+    const newAlert = await PriceAlert.create({
+      user: userId,
       symbol,
-      condition,
-      price,
-      repeatable: repeatable || false,
-      active: true
+      targetPrice,
+      direction,
+      notificationType: notificationType || 'app'
     });
-    
-    await alert.save();
     
     res.status(201).json({
       success: true,
-      message: 'Price alert created successfully',
-      data: alert
+      data: newAlert
     });
   } catch (error) {
-    logger.error('Error creating price alert:', error);
     next(error);
   }
 };
 
 // Update price alert
-export const updateAlert = async (req, res, next) => {
+export const updatePriceAlert = async (req, res, next) => {
   try {
-    const { id } = req.params;
-    const { condition, price, active, repeatable } = req.body;
+    const userId = req.user.id;
+    const alertId = req.params.id;
+    const updates = req.body;
     
-    const alert = await PriceAlert.findOne({
-      _id: id,
-      user: req.user._id
-    });
+    const alert = await PriceAlert.findById(alertId);
     
+    // Check if alert exists
     if (!alert) {
-      throw new ApiError('Price alert not found', 404, 'not_found');
+      throw new ApiError('Price alert not found', 404);
     }
     
-    // Update fields if provided
-    if (condition !== undefined) {
-      if (!['above', 'below'].includes(condition)) {
-        throw new ApiError('Condition must be either "above" or "below"', 400, 'validation_error');
-      }
-      alert.condition = condition;
+    // Check if alert belongs to user
+    if (alert.user.toString() !== userId) {
+      throw new ApiError('Unauthorized', 403);
     }
     
-    if (price !== undefined) {
-      if (typeof price !== 'number' || price <= 0) {
-        throw new ApiError('Price must be a positive number', 400, 'validation_error');
-      }
-      alert.price = price;
-    }
-    
-    if (active !== undefined) {
-      alert.active = active;
-      
-      // If reactivating, reset triggered flag
-      if (active === true && alert.triggered) {
-        alert.triggered = false;
-        alert.triggeredAt = null;
-      }
-    }
-    
-    if (repeatable !== undefined) {
-      alert.repeatable = repeatable;
-    }
-    
-    await alert.save();
+    // Update alert
+    const updatedAlert = await PriceAlert.findByIdAndUpdate(
+      alertId,
+      updates,
+      { new: true, runValidators: true }
+    );
     
     res.status(200).json({
       success: true,
-      message: 'Price alert updated successfully',
-      data: alert
+      data: updatedAlert
     });
   } catch (error) {
-    logger.error(`Error updating price alert ${req.params.id}:`, error);
     next(error);
   }
 };
 
 // Delete price alert
-export const deleteAlert = async (req, res, next) => {
+export const deletePriceAlert = async (req, res, next) => {
   try {
-    const { id } = req.params;
+    const userId = req.user.id;
+    const alertId = req.params.id;
     
-    const alert = await PriceAlert.findOne({
-      _id: id,
-      user: req.user._id
-    });
+    const alert = await PriceAlert.findById(alertId);
     
+    // Check if alert exists
     if (!alert) {
-      throw new ApiError('Price alert not found', 404, 'not_found');
+      throw new ApiError('Price alert not found', 404);
     }
     
-    await PriceAlert.deleteOne({ _id: id });
+    // Check if alert belongs to user
+    if (alert.user.toString() !== userId) {
+      throw new ApiError('Unauthorized', 403);
+    }
+    
+    // Delete alert
+    await PriceAlert.findByIdAndDelete(alertId);
     
     res.status(200).json({
       success: true,
       message: 'Price alert deleted successfully'
     });
   } catch (error) {
-    logger.error(`Error deleting price alert ${req.params.id}:`, error);
     next(error);
   }
 };
 
 export default {
-  getUserAlerts,
-  createAlert,
-  updateAlert,
-  deleteAlert
+  getUserPriceAlerts,
+  createPriceAlert,
+  updatePriceAlert,
+  deletePriceAlert
 };

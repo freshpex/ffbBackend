@@ -8,56 +8,65 @@ import { ApiError } from '../middleware/errorHandler.js';
 // Investment plans
 const INVESTMENT_PLANS = [
   {
-    id: 'starter',
-    name: 'Starter Plan',
-    description: 'A low-risk investment plan for beginners',
-    minAmount: 100,
-    maxAmount: 5000,
-    roi: 0.5, // 0.5% daily
-    duration: 30, // days
-    payoutFrequency: 'daily'
+    id: 'basic',
+    name: 'Basic Plan',
+    minAmount: 1000,
+    maxAmount: 10000,
+    returnRate: 0.05,
+    duration: 30,
+    features: ['Lower risk', 'Fixed returns', 'Monthly payouts'],
+    description: 'Our entry-level investment plan designed for beginners. Start your investment journey with minimal risk and steady returns.',
+    roi: '5% monthly'
   },
   {
-    id: 'growth',
-    name: 'Growth Plan',
-    description: 'Medium-risk plan with higher returns',
-    minAmount: 1000,
-    maxAmount: 15000,
-    roi: 0.8, // 0.8% daily
-    duration: 45, // days
-    payoutFrequency: 'daily'
+    id: 'standard',
+    name: 'Standard Plan',
+    minAmount: 10000,
+    maxAmount: 50000,
+    returnRate: 0.08,
+    duration: 60,
+    features: ['Moderate risk', 'Higher returns', 'Bi-weekly payouts'],
+    description: 'Balanced investment option for experienced investors looking for better returns with manageable risk levels.',
+    roi: '8% monthly'
   },
   {
     id: 'premium',
     name: 'Premium Plan',
-    description: 'Higher risk premium plan for maximum returns',
-    minAmount: 5000,
-    maxAmount: 50000,
-    roi: 1.2, // 1.2% daily
-    duration: 60, // days
-    payoutFrequency: 'daily'
-  },
-  {
-    id: 'vip',
-    name: 'VIP Plan',
-    description: 'Exclusive high-return plan for VIP investors',
-    minAmount: 25000,
-    roi: 1.5, // 1.5% daily
-    duration: 90, // days
-    payoutFrequency: 'daily'
+    minAmount: 50000,
+    maxAmount: 250000,
+    returnRate: 0.12,
+    duration: 90,
+    features: ['Strategic investments', 'Premium returns', 'Weekly payouts', 'Priority support'],
+    description: 'Our premium offering for serious investors. High returns with expert portfolio management and exclusive benefits.',
+    roi: '12% monthly'
   }
 ];
 
 // Get all investment plans
-export const getInvestmentPlans = async (req, res, next) => {
+export const getInvestmentPlans = async (req, res) => {
   try {
-    res.status(200).json({
-      success: true,
-      data: INVESTMENT_PLANS
-    });
+    // Check if using database or static plans
+    if (process.env.USE_DB_PLANS === 'true') {
+      // If using database, fetch from InvestmentPlan model
+      const plans = await InvestmentPlan.find({ isActive: true });
+      return res.status(200).json({
+        success: true,
+        data: plans
+      });
+    } else {
+      // Return the static INVESTMENT_PLANS constant
+      return res.status(200).json({
+        success: true,
+        data: INVESTMENT_PLANS
+      });
+    }
   } catch (error) {
-    logger.error('Error fetching investment plans:', error);
-    next(error);
+    console.error('Error fetching investment plans:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch investment plans',
+      error: error.message
+    });
   }
 };
 
@@ -78,35 +87,49 @@ export const getInvestmentPlanById = async (req, res, next) => {
   }
 };
 
-// Get user's investments
-export const getUserInvestments = async (req, res, next) => {
+export const getUserInvestments = async (req, res) => {
   try {
-    const { status, page = 1, limit = 10 } = req.query;
-
-    const query = { user: req.user._id };
-    if (status) query.status = status;
-
-    const total = await Investment.countDocuments(query);
-    const investments = await Investment.find(query)
+    const userId = req.user.id;
+    
+    const investments = await Investment.find({ userId })
       .sort({ createdAt: -1 })
-      .skip((parseInt(page) - 1) * parseInt(limit))
-      .limit(parseInt(limit));
-
-    res.status(200).json({
+      .populate('planId');
+    
+    // Separate active and completed investments
+    const active = investments.filter(inv => 
+      inv.status === 'active' || inv.status === 'pending'
+    );
+    
+    const history = investments.filter(inv => 
+      inv.status === 'completed' || inv.status === 'cancelled'
+    );
+    
+    // Calculate statistics
+    const totalInvested = investments.reduce((sum, inv) => sum + inv.amount, 0);
+    const totalEarnings = investments
+      .filter(inv => inv.status === 'completed')
+      .reduce((sum, inv) => sum + (inv.earnings || 0), 0);
+    
+    return res.status(200).json({
       success: true,
       data: {
-        investments,
-        pagination: {
-          total,
-          page: parseInt(page),
-          limit: parseInt(limit),
-          pages: Math.ceil(total / parseInt(limit))
+        active,
+        history,
+        statistics: {
+          totalInvested,
+          totalEarnings,
+          activeCount: active.length,
+          historyCount: history.length
         }
       }
     });
   } catch (error) {
-    logger.error('Error fetching user investments:', error);
-    next(error);
+    console.error('Error fetching user investments:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch investments',
+      error: error.message
+    });
   }
 };
 
@@ -223,10 +246,47 @@ export const getInvestmentById = async (req, res, next) => {
   }
 };
 
+// Update or create this function to handle statistics properly
+export const getInvestmentStatistics = async (req, res) => {
+  try {
+    // Get the user ID from the authenticated user 
+    const userId = req.user.id;
+    
+    // Query investments for this user
+    const investments = await Investment.find({ userId });
+    
+    // Calculate statistics
+    const totalInvestments = investments.length;
+    const activeInvestments = investments.filter(inv => inv.status === 'active').length;
+    const totalInvested = investments.reduce((sum, inv) => sum + inv.amount, 0);
+    const totalReturns = investments.reduce((sum, inv) => sum + (inv.returns || 0), 0);
+    
+    // Return statistics as an object
+    res.status(200).json({
+      success: true,
+      data: {
+        totalInvestments,
+        activeInvestments,
+        totalInvested,
+        totalReturns,
+        roi: totalInvested > 0 ? (totalReturns / totalInvested) * 100 : 0,
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching investment statistics:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch investment statistics',
+      error: error.message
+    });
+  }
+};
+
 export default {
   getInvestmentPlans,
   getInvestmentPlanById,
   getUserInvestments,
   createInvestment,
-  getInvestmentById
+  getInvestmentById,
+  getInvestmentStatistics
 };

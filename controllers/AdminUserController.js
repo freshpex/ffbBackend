@@ -227,6 +227,8 @@ export const updateUser = async (req, res, next) => {
       throw new ApiError('Only superadmins can update admin users', 403, 'forbidden');
     }
     
+    const updateData = {};
+    
     // Check if email is being changed and if it's already in use
     if (email && email !== user.email) {
       const existingUser = await User.findOne({ email });
@@ -235,23 +237,23 @@ export const updateUser = async (req, res, next) => {
         throw new ApiError('Email already in use', 400, 'duplicate_email');
       }
       
-      user.email = email;
+      updateData.email = email;
     }
     
-    // Update basic fields
-    if (firstName) user.firstName = firstName;
-    if (lastName) user.lastName = lastName;
-    if (status) user.status = status;
+    // Add fields to update data
+    if (firstName) updateData.firstName = firstName;
+    if (lastName) updateData.lastName = lastName;
+    if (status) updateData.status = status;
     
     // Only superadmins can change roles
     if (role && req.user.role === 'superadmin') {
-      user.role = role;
+      updateData.role = role;
     }
     
     // Update password if provided
     if (password) {
       const salt = await bcrypt.genSalt(10);
-      user.password = await bcrypt.hash(password, salt);
+      updateData.password = await bcrypt.hash(password, salt);
     }
     
     // Handle balance updates
@@ -260,7 +262,7 @@ export const updateUser = async (req, res, next) => {
       const balanceDiff = balance - oldBalance;
       
       if (balanceDiff !== 0) {
-        user.balance = balance;
+        updateData.balance = balance;
         
         // Create a transaction record for the balance adjustment
         const transaction = new Transaction({
@@ -278,20 +280,20 @@ export const updateUser = async (req, res, next) => {
       }
     }
     
-    await user.save({ session });
+    const updatedUser = await User.findByIdAndUpdate(
+      id,
+      { $set: updateData },
+      { new: true, session }
+    ).select('-password');
     
     await session.commitTransaction();
     
-    // Return user without sensitive information
-    const userData = user.toObject();
-    delete userData.password;
-    
-    logger.info(`Admin ${req.user.email} updated user: ${user.email}`);
+    logger.info(`Admin ${req.user.email} updated user: ${updatedUser.email}`);
     
     res.status(200).json({
       success: true,
       message: 'User updated successfully',
-      data: userData
+      data: updatedUser
     });
   } catch (error) {
     await session.abortTransaction();

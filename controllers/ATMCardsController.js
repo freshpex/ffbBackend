@@ -2,6 +2,7 @@ import ATMCard from '../models/ATMCard.js';
 import mongoose from 'mongoose';
 import logger from '../middleware/logger.js';
 import { ApiError } from '../middleware/errorHandler.js';
+import { createCardRequestNotification } from '../services/notificationService.js';
 
 // Get all ATM cards for a user
 export const getUserATMCards = async (req, res, next) => {
@@ -55,6 +56,11 @@ export const createATMCardRequest = async (req, res, next) => {
     });
 
     await newCard.save();
+
+    // After successfully creating the card request, send notification
+    if (newCard) {
+      await createCardRequestNotification(newCard, req.user);
+    }
 
     res.status(201).json({
       success: true,

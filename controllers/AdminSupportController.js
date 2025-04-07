@@ -2,6 +2,7 @@ import SupportTicket from '../models/SupportTicket.js';
 import User from '../models/User.js';
 import logger from '../middleware/logger.js';
 import { ApiError } from '../middleware/errorHandler.js';
+const { createSupportTicketNotification } = require('../services/notificationService');
 
 // Get all support tickets with filtering and pagination
 export const getAllSupportTickets = async (req, res, next) => {
@@ -90,6 +91,7 @@ export const updateSupportTicket = async (req, res, next) => {
     if (adminNotes) ticket.adminNotes = adminNotes;
 
     await ticket.save();
+    await createSupportTicketNotification(ticket.adminNotes, user);
 
     res.status(200).json({
       success: true,
@@ -117,6 +119,7 @@ export const addSupportTicketReply = async (req, res, next) => {
     if (!ticket) {
       throw new ApiError('Support ticket not found', 404, 'not_found');
     }
+    await createSupportTicketNotification(ticket, req.user);
 
     ticket.replies.push({
       message,
