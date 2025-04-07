@@ -130,15 +130,15 @@ export const processTransaction = async (req, res, next) => {
       
       if (transaction.type === 'deposit') {
         user.balance += Math.abs(transaction.amount);
-        await createTransactionNotification(deposit, req.user);
-        await createTransactionNotification(deposit, user);
+        await createTransactionNotification(transaction, req.user);
+        await createTransactionNotification(transaction, user);
         logger.info(`Admin ${req.user.email} approved deposit of ${Math.abs(transaction.amount)} for user ${user.email}`);
       } 
       else if (transaction.type === 'withdrawal') {
         // For withdrawals, the balance was already deducted when request was created
         // No need to deduct again, just log
-        await createTransactionNotification(withdrawal, req.user);
-        await createTransactionNotification(withdrawal, user);
+        await createTransactionNotification(transaction, req.user);
+        await createTransactionNotification(transaction, user);
         logger.info(`Admin ${req.user.email} approved withdrawal of ${Math.abs(transaction.amount)} for user ${user.email}`);
       }
       
