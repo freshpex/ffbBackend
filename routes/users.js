@@ -1,7 +1,7 @@
 import express from 'express';
 import { verifyToken } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
-import UserProfileController from '../controllers/UserProfileController.js';
+import UserProfileController, { getUserBalance, getUserProfile, getAccountSummary } from '../controllers/UserProfileController.js';
 import UserSecurityController from '../controllers/UserSecurityController.js';
 import UserPaymentMethodsController from '../controllers/UserPaymentMethodsController.js';
 
@@ -19,6 +19,12 @@ router.post('/profile/image', UserProfileController.upload.single('image'), asyn
 router.get('/preferences', asyncHandler(UserProfileController.getUserPreferences));
 router.put('/preferences', asyncHandler(UserProfileController.updateUserPreferences));
 
+// Add route for user profile
+router.get('/profile', verifyToken, asyncHandler(getUserProfile));
+
+// Add route for account summary
+router.get('/account-summary', verifyToken, asyncHandler(getAccountSummary));
+
 // User security routes
 router.put('/security/password', asyncHandler(UserSecurityController.changePassword));
 router.post('/security/2fa/setup', asyncHandler(UserSecurityController.setup2FA));
@@ -35,5 +41,6 @@ router.post('/payment-methods/card', asyncHandler(UserPaymentMethodsController.a
 router.put('/payment-methods/:id', asyncHandler(UserPaymentMethodsController.updatePaymentMethod));
 router.put('/payment-methods/:id/default', asyncHandler(UserPaymentMethodsController.setDefaultPaymentMethod));
 router.delete('/payment-methods/:id', asyncHandler(UserPaymentMethodsController.deletePaymentMethod));
+router.get('/balance', verifyToken, asyncHandler(getUserBalance));
 
 export default router;

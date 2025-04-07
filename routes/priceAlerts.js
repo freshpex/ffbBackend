@@ -2,27 +2,24 @@ import express from 'express';
 import { verifyToken } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import {
-  getUserAlerts,
-  createAlert,
-  updateAlert,
-  deleteAlert
+  getUserPriceAlerts,
+  createPriceAlert,
+  updatePriceAlert,
+  deletePriceAlert
 } from '../controllers/PriceAlertController.js';
 
 const router = express.Router();
 
-// Apply authentication middleware to all routes
-router.use(verifyToken);
-
-// Get all price alerts for current user
-router.get('/', asyncHandler(getUserAlerts));
+// Get user's price alerts
+router.get('/', verifyToken, asyncHandler(getUserPriceAlerts));
 
 // Create new price alert
-router.post('/', asyncHandler(createAlert));
+router.post('/', verifyToken, asyncHandler(createPriceAlert));
 
 // Update price alert
-router.put('/:id', asyncHandler(updateAlert));
+router.patch('/:id', verifyToken, asyncHandler(updatePriceAlert));
 
 // Delete price alert
-router.delete('/:id', asyncHandler(deleteAlert));
+router.delete('/:id', verifyToken, asyncHandler(deletePriceAlert));
 
 export default router;

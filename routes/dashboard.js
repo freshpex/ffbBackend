@@ -2,31 +2,32 @@ import express from 'express';
 import { verifyToken } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import {
-  getAccountSummary,
+  getDashboardOverview,
   getRecentTransactions,
   getFinancialHighlights,
+  getMarketOverview,
   getMarketPulse,
-  getDashboardData
+  getMarketNews
 } from '../controllers/DashboardController.js';
 
 const router = express.Router();
 
-// Apply authentication middleware to all routes
-router.use(verifyToken);
-
-// Get all dashboard data in a single request
-router.get('/', asyncHandler(getDashboardData));
-
-// Get account summary
-router.get('/account-summary', asyncHandler(getAccountSummary));
+// Get dashboard overview (combines multiple data points)
+router.get('/', verifyToken, asyncHandler(getDashboardOverview));
 
 // Get recent transactions
-router.get('/recent-transactions', asyncHandler(getRecentTransactions));
+router.get('/transactions', verifyToken, asyncHandler(getRecentTransactions));
 
 // Get financial highlights
-router.get('/financial-highlights', asyncHandler(getFinancialHighlights));
+router.get('/financial-highlights', verifyToken, asyncHandler(getFinancialHighlights));
 
-// Get market pulse data
-router.get('/market-pulse', asyncHandler(getMarketPulse));
+// Get market overview
+router.get('/market-overview', verifyToken, asyncHandler(getMarketOverview));
+
+// Get market pulse
+router.get('/market-pulse', verifyToken, asyncHandler(getMarketPulse));
+
+// Get market news
+router.get('/market-news', verifyToken, asyncHandler(getMarketNews));
 
 export default router;

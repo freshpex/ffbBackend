@@ -6,7 +6,8 @@ import {
   getInvestmentPlanById,
   getUserInvestments,
   createInvestment,
-  getInvestmentById
+  getInvestmentById,
+  getInvestmentStatistics
 } from '../controllers/InvestmentController.js';
 
 const router = express.Router();
@@ -16,6 +17,9 @@ router.use(verifyToken);
 
 // Get all investment plans
 router.get('/plans', asyncHandler(getInvestmentPlans));
+
+// Add this specific route for user investments BEFORE the :id route
+router.get('/user-investments', verifyToken, asyncHandler(getUserInvestments));
 
 // Get specific investment plan
 router.get('/plans/:id', asyncHandler(getInvestmentPlanById));
@@ -28,5 +32,8 @@ router.post('/', asyncHandler(createInvestment));
 
 // Get specific investment details
 router.get('/:id', asyncHandler(getInvestmentById));
+
+// Get investment statistics
+router.get('/statistics', asyncHandler(getInvestmentStatistics));
 
 export default router;

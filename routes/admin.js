@@ -235,7 +235,11 @@ router.put('/users/:id', requireAdmin, asyncHandler(async (req, res) => {
   const user = await User.findByIdAndUpdate(
     req.params.id,
     { $set: allowedUpdates },
-    { new: true }
+    { 
+      new: true,
+      runValidators: false,
+      context: 'query' 
+    }
   ).select('-password -apiKeys.secret');
   
   if (!user) {
@@ -433,5 +437,16 @@ router.put('/settings', asyncHandler(AdminSettingsController.updateSettings));
 router.post('/settings', asyncHandler(AdminSettingsController.createSetting));
 router.delete('/settings/:key', asyncHandler(AdminSettingsController.deleteSetting));
 router.post('/settings/reset', asyncHandler(AdminSettingsController.resetToDefaults));
+
+// Notification routes
+router.get('/notifications', authenticateAdmin, adminNotificationController.getAdminNotifications);
+router.get('/notifications/unread-count', authenticateAdmin, adminNotificationController.getUnreadCount);
+router.put('/notifications/:id/read', authenticateAdmin, adminNotificationController.markAsRead);
+router.put('/notifications/read-all', authenticateAdmin, adminNotificationController.markAllAsRead);
+router.delete('/notifications/:id', authenticateAdmin, adminNotificationController.deleteNotification);
+router.post('/notifications', authenticateAdmin, [
+  check('title', 'Title is required').not().isEmpty(),
+  check('message', 'Message is required').not().isEmpty()
+], adminNotificationController.createNotification);
 
 export default router;

@@ -84,12 +84,42 @@ const setupWebsocket = (server) => {
     io.emit('announcement', announcement);
   };
 
+  const setupAdminNotificationSocket = (io) => {
+    const adminNamespace = io.of('/admin');
+    
+    adminNamespace.on('connection', (socket) => {
+      console.log('Admin connected to notification socket');
+      
+      socket.on('join', (data) => {
+        // You could use an admin token to verify access here
+        if (data.adminToken) {
+          socket.join('admin-notifications');
+          console.log('Admin joined notification channel');
+        }
+      });
+      
+      socket.on('disconnect', () => {
+        console.log('Admin disconnected from notification socket');
+      });
+    });
+    
+    return adminNamespace;
+  };
+  
+  // Function to emit admin notification to connected admins
+  const emitAdminNotification = (io, notification) => {
+    const adminNamespace = io.of('/admin');
+    adminNamespace.to('admin-notifications').emit('notification', notification);
+  };
+
   // Return methods that can be used elsewhere in the application
   return {
     io,
     broadcastMarketData,
     sendUserNotification,
     broadcastAnnouncement,
+    setupAdminNotificationSocket,
+    emitAdminNotification,
     getConnectedClients: () => connectedClients.size
   };
 };
