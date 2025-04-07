@@ -3,6 +3,9 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 import logger from '../middleware/logger.js';
+import mongoose from 'mongoose';
+import LoginActivity from '../models/LoginActivity.js';
+import { googleAuth } from '../controllers/authController.js';
 
 const router = express.Router();
 
@@ -368,5 +371,7 @@ router.post('/sync', async (req, res) => {
 router.post('/reset-password', (req, res) => {
   res.status(200).json({ message: 'Password reset email sent' });
 });
+
+router.post('/google-auth', googleAuth);
 
 export default router;

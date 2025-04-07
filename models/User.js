@@ -69,7 +69,9 @@ const userSchema = new mongoose.Schema({
   },
   password: {
     type: String,
-    required: true
+    required: function() {
+      return this.authMethod === 'local' || !this.authMethod;
+    }
   },
   firstName: {
     type: String,
@@ -203,6 +205,11 @@ const userSchema = new mongoose.Schema({
       type: Boolean,
       default: false
     }
+  },
+  authMethod: {
+    type: String,
+    enum: ['local', 'google', 'facebook'],
+    default: 'local'
   }
 }, {
   timestamps: true
