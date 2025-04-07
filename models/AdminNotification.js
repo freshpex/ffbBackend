@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const adminNotificationSchema = new mongoose.Schema({
   title: {
@@ -21,19 +21,19 @@ const adminNotificationSchema = new mongoose.Schema({
   sourceId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Mixed',
-    required: false // ID of the related document (KYC request, support ticket, etc.)
+    required: false
   },
   sourceModel: {
     type: String,
-    required: false // Name of the model the notification relates to
+    required: false
   },
   sourceType: {
     type: String,
-    required: false // Specific type within the source (e.g., 'kyc_submitted', 'ticket_created')
+    required: false
   },
   link: {
     type: String,
-    required: false // Optional link to navigate to when clicking the notification
+    required: false
   },
   createdAt: {
     type: Date,
@@ -48,4 +48,4 @@ adminNotificationSchema.index({ createdAt: -1 });
 
 const AdminNotification = mongoose.model('AdminNotification', adminNotificationSchema);
 
-module.exports = AdminNotification;
+export default AdminNotification;

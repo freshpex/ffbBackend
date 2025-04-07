@@ -110,6 +110,8 @@ const setupWebsocket = (server) => {
   const emitAdminNotification = (io, notification) => {
     const adminNamespace = io.of('/admin');
     adminNamespace.to('admin-notifications').emit('notification', notification);
+    console.log('Admin notification emitted:', notification.title);
+    return true;
   };
 
   // Return methods that can be used elsewhere in the application
@@ -122,6 +124,20 @@ const setupWebsocket = (server) => {
     emitAdminNotification,
     getConnectedClients: () => connectedClients.size
   };
+};
+
+// Export this function to be used in models when creating notifications
+export const broadcastAdminNotification = async (notification) => {
+  try {
+    if (global.io) {
+      emitAdminNotification(global.io, notification);
+      return true;
+    }
+    return false;
+  } catch (error) {
+    console.error('Error broadcasting admin notification:', error);
+    return false;
+  }
 };
 
 export default setupWebsocket;

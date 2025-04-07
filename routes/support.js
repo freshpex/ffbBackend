@@ -4,7 +4,7 @@ import { asyncHandler } from '../middleware/errorHandler.js';
 import {
   getAllSupportTickets,
   getSupportTicketById,
-  updateSupportTicket,
+  updateTicketStatus,
   addSupportTicketReply,
   getSupportTicketStats
 } from '../controllers/AdminSupportController.js';
@@ -24,7 +24,7 @@ router.get('/stats', asyncHandler(getSupportTicketStats));
 router.get('/:id', asyncHandler(getSupportTicketById));
 
 // Update support ticket
-router.put('/:id', asyncHandler(updateSupportTicket));
+router.put('/:id', asyncHandler(updateTicketStatus));
 
 // Add a reply to a support ticket
 router.post('/:id/reply', asyncHandler(addSupportTicketReply));

@@ -33,7 +33,7 @@ const educationContentSchema = new mongoose.Schema(
       default: null
     },
     readTime: {
-      type: Number, // in minutes
+      type: Number,
       default: 5
     },
     author: {
