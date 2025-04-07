@@ -3,6 +3,7 @@ import User from '../models/User.js';
 import logger from '../middleware/logger.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { validationResult } from 'express-validator';
+import AdminNotification from '../models/AdminNotification.js';
 
 // Get all admin notifications
 export const getAdminNotifications = async (req, res, next) => {
@@ -252,52 +253,27 @@ export const getNotificationStats = async (req, res, next) => {
   }
 };
 
-export default {
-  getAdminNotifications,
-  getNotificationById,
-  markNotificationAsRead,
-  markAllNotificationsAsRead,
-  deleteNotification,
-  createSystemNotification,
-  getNotificationStats
-};
-
-const AdminNotification = require('../models/AdminNotification');
-
-// Get all admin notifications
-exports.getAdminNotifications = async (req, res) => {
+// Get unread notification count
+export const getUnreadCount = async (req, res) => {
   try {
-    const limit = parseInt(req.query.limit) || 50;
-    const skip = parseInt(req.query.skip) || 0;
-    
-    const notifications = await AdminNotification
-      .find({})
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit);
-    
-    const unreadCount = await AdminNotification.countDocuments({ read: false });
+    const count = await AdminNotification.countDocuments({ read: false });
     
     return res.status(200).json({
       success: true,
-      data: {
-        notifications,
-        unreadCount,
-        total: await AdminNotification.countDocuments({})
-      }
+      count
     });
   } catch (error) {
-    console.error('Error fetching admin notifications:', error);
+    console.error('Error getting unread count:', error);
     return res.status(500).json({
       success: false,
-      message: 'Server error while fetching notifications',
+      message: 'Server error',
       error: error.message
     });
   }
 };
 
 // Mark a notification as read
-exports.markAsRead = async (req, res) => {
+export const markAsRead = async (req, res) => {
   try {
     const notificationId = req.params.id;
     
@@ -329,7 +305,7 @@ exports.markAsRead = async (req, res) => {
 };
 
 // Mark all notifications as read
-exports.markAllAsRead = async (req, res) => {
+export const markAllAsRead = async (req, res) => {
   try {
     const result = await AdminNotification.updateMany(
       { read: false },
@@ -351,56 +327,9 @@ exports.markAllAsRead = async (req, res) => {
   }
 };
 
-// Delete a notification
-exports.deleteNotification = async (req, res) => {
-  try {
-    const notificationId = req.params.id;
-    
-    const notification = await AdminNotification.findById(notificationId);
-    if (!notification) {
-      return res.status(404).json({
-        success: false,
-        message: 'Notification not found'
-      });
-    }
-    
-    await notification.deleteOne();
-    
-    return res.status(200).json({
-      success: true,
-      message: 'Notification deleted successfully'
-    });
-  } catch (error) {
-    console.error('Error deleting notification:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Server error',
-      error: error.message
-    });
-  }
-};
-
-// Get unread notification count
-exports.getUnreadCount = async (req, res) => {
-  try {
-    const count = await AdminNotification.countDocuments({ read: false });
-    
-    return res.status(200).json({
-      success: true,
-      count
-    });
-  } catch (error) {
-    console.error('Error getting unread count:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Server error',
-      error: error.message
-    });
-  }
-};
-
 // Internal function to create a new admin notification
-exports.createAdminNotification = async (data) => {
+// Export this function so it can be imported by notificationService.js
+export const createAdminNotification = async (data) => {
   try {
     const notification = new AdminNotification({
       title: data.title,
@@ -421,7 +350,7 @@ exports.createAdminNotification = async (data) => {
 };
 
 // API endpoint to create notification (for testing/manual creation)
-exports.createNotification = async (req, res) => {
+export const createNotification = async (req, res) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -434,7 +363,7 @@ exports.createNotification = async (req, res) => {
     
     const { title, message, type, sourceId, sourceModel, sourceType, link } = req.body;
     
-    const notification = await this.createAdminNotification({
+    const notification = await createAdminNotification({
       title,
       message,
       type,
@@ -457,4 +386,19 @@ exports.createNotification = async (req, res) => {
       error: error.message
     });
   }
+};
+
+export default {
+  getAdminNotifications,
+  getNotificationById,
+  markNotificationAsRead,
+  markAllNotificationsAsRead,
+  deleteNotification,
+  createSystemNotification,
+  getNotificationStats,
+  getUnreadCount,
+  markAsRead,
+  markAllAsRead,
+  createAdminNotification,
+  createNotification
 };

@@ -3,7 +3,8 @@ import KycRequest from '../models/KycRequest.js';
 import mongoose from 'mongoose';
 import logger from '../middleware/logger.js';
 import { ApiError } from '../middleware/errorHandler.js';
-const { createKycNotification } = require('../services/notificationService');
+import { createKycNotification } from '../services/notificationService.js';
+import AdminNotification from '../models/AdminNotification.js';
 
 // Get all KYC requests with filtering and pagination
 export const getAllKycRequests = async (req, res, next) => {
@@ -130,7 +131,7 @@ export const approveKycRequest = async (req, res, next) => {
     user.kycApprovedAt = new Date();
     
     await user.save({ session });
-    await createKycNotification(user.kycVerified, user);
+    await createKycNotification(kycRequest, user);
     await session.commitTransaction();
     
     // Log the action
@@ -193,6 +194,9 @@ export const rejectKycRequest = async (req, res, next) => {
     user.kycStatus = 'rejected';
     
     await user.save({ session });
+    
+    // Create notification
+    await createKycNotification(kycRequest, user);
     
     await session.commitTransaction();
     

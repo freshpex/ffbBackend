@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import logger from '../middleware/logger.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { createCardRequestNotification } from '../services/notificationService.js';
+import AdminNotification from '../models/AdminNotification.js';
 
 // Get all ATM cards for a user
 export const getUserATMCards = async (req, res, next) => {
@@ -146,11 +147,44 @@ export const getATMCardRequests = async (req, res, next) => {
   }
 };
 
+export const requestCard = async (req, res) => {
+  try {
+    // Existing code to handle card request...
+    
+    // After successfully creating the card request, send notification
+    if (cardRequest) {
+      await createCardRequestNotification(cardRequest, req.user);
+    }
+    
+    // Rest of your function...
+  } catch (error) {
+    // Error handling...
+  }
+};
+
+export const updateCardStatus = async (req, res) => {
+  try {
+    // Existing code to update card status...
+    
+    // After successfully updating the card request status, send notification
+    if (updatedCard) {
+      const user = await User.findById(updatedCard.userId);
+      await createCardRequestNotification(updatedCard, user);
+    }
+    
+    // Rest of your function...
+  } catch (error) {
+    // Error handling...
+  }
+};
+
 export default {
   getUserATMCards,
   getATMCardById,
   createATMCardRequest,
   updateATMCardLimits,
   cancelATMCardRequest,
-  getATMCardRequests
+  getATMCardRequests,
+  requestCard,
+  updateCardStatus
 };

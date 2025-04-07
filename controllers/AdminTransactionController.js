@@ -3,7 +3,7 @@ import User from '../models/User.js';
 import mongoose from 'mongoose';
 import logger from '../middleware/logger.js';
 import { ApiError } from '../middleware/errorHandler.js';
-const { createTransactionNotification } = require('../services/notificationService');
+import { createTransactionNotification } from '../services/notificationService.js';
 
 // Get all transactions with filtering and pagination
 export const getAllTransactions = async (req, res, next) => {
