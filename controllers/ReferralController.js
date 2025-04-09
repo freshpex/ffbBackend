@@ -256,6 +256,36 @@ export const completeReferral = async (req, res, next) => {
   }
 };
 
+// Generate referral link
+export const generateReferralLink = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user._id);
+    
+    if (!user) {
+      throw new ApiError('User not found', 404, 'not_found');
+    }
+    
+    if (!user.referralCode) {
+      user.referralCode = crypto.randomBytes(4).toString('hex').toUpperCase();
+      await user.save();
+    }
+    
+    const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5172';
+    const referralLink = `${baseUrl}/register?ref=${user.referralCode}`;
+    
+    res.status(200).json({
+      success: true,
+      data: {
+        referralCode: user.referralCode,
+        referralLink
+      }
+    });
+  } catch (error) {
+    logger.error('Error generating referral link:', error);
+    next(error);
+  }
+};
+
 // Get referral program details
 export const getReferralProgram = async (req, res, next) => {
   try {
@@ -349,5 +379,6 @@ export default {
   getUserReferrals,
   applyReferralCode,
   completeReferral,
-  getReferralProgram
+  getReferralProgram,
+  generateReferralLink
 };

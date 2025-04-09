@@ -67,7 +67,12 @@ export const getCardById = async (req, res, next) => {
 export const requestCard = async (req, res, next) => {
   try {
     const userId = req.user._id;
-    const { cardType = 'virtual', shippingAddress } = req.body;
+    const { 
+      type = 'virtual-debit', 
+      name = `${req.user.firstName} ${req.user.lastName}`,
+      shippingAddress, 
+      billingAddress 
+    } = req.body;
     
     // Check if user has reached card limit
     const userCardCount = await ATMCard.countDocuments({ user: userId });
@@ -77,25 +82,40 @@ export const requestCard = async (req, res, next) => {
       throw new ApiError(`You have reached the limit of ${cardLimit} cards`, 400, 'limit_reached');
     }
     
+    // Validate card type
+    if (!['virtual-debit', 'standard-debit', 'premium-debit'].includes(type)) {
+      throw new ApiError('Invalid card type. Must be virtual-debit, standard-debit, or premium-debit', 400, 'validation_error');
+    }
+    
     // For physical cards, shipping address is required
-    if (cardType === 'physical' && !shippingAddress) {
+    if (['standard-debit', 'premium-debit'].includes(type) && !shippingAddress) {
       throw new ApiError('Shipping address is required for physical cards', 400, 'validation_error');
     }
+    
+    // Generate card details
+    const cardNumber = generateCardNumber();
+    const expiryDate = getExpiryDate();
+    const cvv = generateCVV();
     
     // Create new card request
     const newCard = new ATMCard({
       user: userId,
-      cardType,
+      cardNumber,
+      name,
+      type,
       status: 'pending',
-      requestId: uuidv4(),
-      shippingAddress: cardType === 'physical' ? shippingAddress : undefined
+      expiryDate,
+      cvv,
+      currency: 'USD',
+      shippingAddress: shippingAddress || {},
+      billingAddress: billingAddress || {}
     });
     
     await newCard.save();
     
     res.status(201).json({
       success: true,
-      message: `Your ${cardType} card request has been submitted and is pending approval`,
+      message: `Your ${type} card request has been submitted and is pending approval`,
       data: newCard
     });
   } catch (error) {

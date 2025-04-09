@@ -12,6 +12,11 @@ router.get('/', asyncHandler(async (req, res) => {
   try {
     const { type, status, page = 1, limit = 10 } = req.query;
     
+    // Check if user is authenticated
+    if (!req.user) {
+      return res.status(401).json({ message: 'Unauthorized - Authentication required' });
+    }
+    
     const query = { user: req.user._id };
     
     if (type) {
@@ -30,10 +35,16 @@ router.get('/', asyncHandler(async (req, res) => {
     const total = await Transaction.countDocuments(query);
     
     res.status(200).json({
-      transactions,
-      page: parseInt(page),
-      totalPages: Math.ceil(total / parseInt(limit)),
-      total
+      success: true,
+      data: {
+        transactions,
+        pagination: {
+          total,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          pages: Math.ceil(total / parseInt(limit))
+        }
+      }
     });
   } catch (error) {
     logger.error('Error fetching transactions:', error);
@@ -45,6 +56,11 @@ router.get('/', asyncHandler(async (req, res) => {
 router.get('/deposits', asyncHandler(async (req, res) => {
   try {
     const { status, page = 1, limit = 10 } = req.query;
+    
+    // Check if user is authenticated
+    if (!req.user) {
+      return res.status(401).json({ message: 'Unauthorized - Authentication required' });
+    }
     
     const query = { 
       user: req.user._id,
@@ -63,10 +79,16 @@ router.get('/deposits', asyncHandler(async (req, res) => {
     const total = await Transaction.countDocuments(query);
     
     res.status(200).json({
-      deposits,
-      page: parseInt(page),
-      totalPages: Math.ceil(total / parseInt(limit)),
-      total
+      success: true,
+      data: {
+        deposits,
+        pagination: {
+          total,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          pages: Math.ceil(total / parseInt(limit))
+        }
+      }
     });
   } catch (error) {
     logger.error('Error fetching deposits:', error);
@@ -78,6 +100,11 @@ router.get('/deposits', asyncHandler(async (req, res) => {
 router.get('/withdrawals', asyncHandler(async (req, res) => {
   try {
     const { status, page = 1, limit = 10 } = req.query;
+    
+    // Check if user is authenticated
+    if (!req.user) {
+      return res.status(401).json({ message: 'Unauthorized - Authentication required' });
+    }
     
     const query = { 
       user: req.user._id,
@@ -96,10 +123,16 @@ router.get('/withdrawals', asyncHandler(async (req, res) => {
     const total = await Transaction.countDocuments(query);
     
     res.status(200).json({
-      withdrawals,
-      page: parseInt(page),
-      totalPages: Math.ceil(total / parseInt(limit)),
-      total
+      success: true,
+      data: {
+        withdrawals,
+        pagination: {
+          total,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          pages: Math.ceil(total / parseInt(limit))
+        }
+      }
     });
   } catch (error) {
     console.error('Error fetching withdrawals:', error);
@@ -113,6 +146,10 @@ router.post('/deposit', async (req, res) => {
   session.startTransaction();
   
   try {
+    if (!req.user) {
+      return res.status(401).json({ message: 'Unauthorized - Authentication required' });
+    }
+    
     const { amount, method, walletAddress, currency = 'USD' } = req.body;
     
     if (!amount || amount <= 0) {
@@ -139,8 +176,9 @@ router.post('/deposit', async (req, res) => {
     await session.commitTransaction();
     
     res.status(201).json({
+      success: true,
       message: 'Deposit request created successfully',
-      transaction: transaction
+      data: transaction
     });
   } catch (error) {
     await session.abortTransaction();
@@ -157,7 +195,11 @@ router.post('/withdrawal', async (req, res) => {
   session.startTransaction();
   
   try {
-    const { amount, method, walletAddress, currency = 'USD' } = req.body;
+    if (!req.user) {
+      return res.status(401).json({ message: 'Unauthorized - Authentication required' });
+    }
+    
+    const { amount, method, walletAddress, bankDetails, paypalEmail, cryptoType, currency = 'USD' } = req.body;
     
     if (!amount || amount <= 0) {
       return res.status(400).json({ message: 'Invalid withdrawal amount' });
@@ -167,11 +209,19 @@ router.post('/withdrawal', async (req, res) => {
       return res.status(400).json({ message: 'Payment method is required' });
     }
     
-    if (['cryptocurrency', 'bitcoin', 'ethereum'].includes(method) && !walletAddress) {
+    if (method === 'cryptocurrency' && !walletAddress) {
       return res.status(400).json({ message: 'Wallet address is required for crypto withdrawals' });
     }
     
-    const user = await User.findById(req.user._id);
+    if (method === 'bank_transfer' && !bankDetails) {
+      return res.status(400).json({ message: 'Bank details are required for bank transfers' });
+    }
+    
+    if (method === 'paypal' && !paypalEmail) {
+      return res.status(400).json({ message: 'PayPal email is required for PayPal withdrawals' });
+    }
+    
+    const user = await User.findById(req.user._id).session(session);
     
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
@@ -204,6 +254,9 @@ router.post('/withdrawal', async (req, res) => {
       currency,
       method,
       walletAddress,
+      bankDetails,
+      paypalEmail,
+      cryptoType,
       status: 'pending',
       description: `Withdrawal via ${method}`
     });
@@ -228,8 +281,9 @@ router.post('/withdrawal', async (req, res) => {
     await session.commitTransaction();
     
     res.status(201).json({
+      success: true,
       message: 'Withdrawal request created successfully',
-      transaction: transaction
+      data: transaction
     });
   } catch (error) {
     await session.abortTransaction();

@@ -114,6 +114,66 @@ export const likeEducationContent = async (req, res, next) => {
   }
 };
 
+// Get educational resources
+export const getResources = async (req, res, next) => {
+  try {
+    const resources = [
+      {
+        id: '1',
+        title: 'Getting Started with Trading',
+        category: 'beginner',
+        type: 'guide',
+        url: '/education/guide/getting-started',
+        description: 'Learn the basics of trading and investing.'
+      },
+      {
+        id: '2',
+        title: 'Understanding Market Analysis',
+        category: 'intermediate',
+        type: 'article',
+        url: '/education/article/market-analysis',
+        description: 'Discover key techniques for analyzing market trends.'
+      },
+      {
+        id: '3',
+        title: 'Advanced Trading Strategies',
+        category: 'advanced',
+        type: 'video',
+        url: '/education/video/advanced-strategies',
+        description: 'Master complex trading strategies for volatile markets.'
+      },
+      {
+        id: '4',
+        title: 'Risk Management Essentials',
+        category: 'risk-management',
+        type: 'guide',
+        url: '/education/guide/risk-management',
+        description: 'Essential principles to protect your investments.'
+      },
+      {
+        id: '5',
+        title: 'Technical Analysis Fundamentals',
+        category: 'market-analysis',
+        type: 'course',
+        url: '/education/course/technical-analysis',
+        description: 'Learn how to read and interpret price charts.'
+      }
+    ];
+    
+    res.status(200).json({
+      success: true,
+      data: {
+        resources: resources,
+        featuredResources: resources.slice(0, 2),
+        courses: resources.filter(r => r.type === 'course')
+      }
+    });
+  } catch (error) {
+    logger.error('Error fetching educational content resources:', error);
+    next(error);
+  }
+};
+
 // Get featured educational content
 export const getFeaturedContent = async (req, res, next) => {
   try {
@@ -191,5 +251,6 @@ export default {
   getEducationContentById,
   likeEducationContent,
   getFeaturedContent,
-  getCategories
+  getCategories,
+  getResources
 };

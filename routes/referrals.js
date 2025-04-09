@@ -6,7 +6,8 @@ import {
   getUserReferrals,
   applyReferralCode,
   completeReferral,
-  getReferralProgram
+  getReferralProgram,
+  generateReferralLink
 } from '../controllers/ReferralController.js';
 
 const router = express.Router();
@@ -19,6 +20,9 @@ router.use(verifyToken);
 
 // Get current user's referral code
 router.get('/code', asyncHandler(getReferralCode));
+
+// Generate referral link
+router.post('/generate-link', asyncHandler(generateReferralLink));
 
 // Get user's referrals
 router.get('/', asyncHandler(getUserReferrals));

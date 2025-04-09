@@ -6,7 +6,8 @@ import {
   getEducationContentById,
   likeEducationContent,
   getFeaturedContent,
-  getCategories
+  getCategories,
+  getResources
 } from '../controllers/EducationController.js';
 
 const router = express.Router();
@@ -19,6 +20,9 @@ router.use(verifyToken);
 
 // Get all educational content
 router.get('/', asyncHandler(getAllEducationContent));
+
+// Get educational resources
+router.get('/resources', asyncHandler(getResources));
 
 // Get featured educational content
 router.get('/featured', asyncHandler(getFeaturedContent));
