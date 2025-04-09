@@ -18,6 +18,8 @@ router.use(verifyToken);
 // Get all user deposits
 router.get('/', asyncHandler(getUserDeposits));
 
+router.get('/history', asyncHandler(getUserDeposits));
+
 // Get deposit stats
 router.get('/stats', asyncHandler(getDepositStats));
 

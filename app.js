@@ -66,7 +66,7 @@ app.use('/api/withdrawals', withdrawalRouter);
 app.use('/api/investments', investmentRouter);
 app.use('/api/market', marketRouter);
 app.use('/api/support', supportRouter);
-app.use('/api/cards', atmCardsRouter);
+app.use('/api/atm-cards', atmCardsRouter);
 app.use('/api/education', educationRouter);
 app.use('/api/referrals', referralRouter);
 app.use('/api/notifications', notificationRouter);

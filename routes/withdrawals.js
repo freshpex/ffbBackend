@@ -18,6 +18,8 @@ router.use(verifyToken);
 // Get all user withdrawals
 router.get('/', asyncHandler(getUserWithdrawals));
 
+router.get('/history', asyncHandler(getUserWithdrawals));
+
 // Get withdrawal stats
 router.get('/stats', asyncHandler(getWithdrawalStats));
 

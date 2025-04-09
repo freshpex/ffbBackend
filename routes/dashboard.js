@@ -7,7 +7,8 @@ import {
   getFinancialHighlights,
   getMarketOverview,
   getMarketPulse,
-  getMarketNews
+  getMarketNews,
+  getAccountSummary
 } from '../controllers/DashboardController.js';
 
 const router = express.Router();
@@ -15,8 +16,14 @@ const router = express.Router();
 // Get dashboard overview (combines multiple data points)
 router.get('/', verifyToken, asyncHandler(getDashboardOverview));
 
+// Get account summary
+router.get('/account-summary', verifyToken, asyncHandler(getAccountSummary));
+
 // Get recent transactions
 router.get('/transactions', verifyToken, asyncHandler(getRecentTransactions));
+
+// Get recent transactions (alternative path)
+router.get('/recent-transactions', verifyToken, asyncHandler(getRecentTransactions));
 
 // Get financial highlights
 router.get('/financial-highlights', verifyToken, asyncHandler(getFinancialHighlights));

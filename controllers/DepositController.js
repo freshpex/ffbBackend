@@ -74,7 +74,16 @@ export const createDeposit = async (req, res, next) => {
   session.startTransaction();
   
   try {
-    const { amount, method, currency = 'USD', walletAddress, txHash, description } = req.body;
+    const { 
+      amount, 
+      method, 
+      currency = 'USD', 
+      transactionId, 
+      cryptoType, 
+      cryptoAddress, 
+      networkType, 
+      note 
+    } = req.body;
     
     // Validate amount
     if (!amount || isNaN(amount) || amount <= 0) {
@@ -86,6 +95,17 @@ export const createDeposit = async (req, res, next) => {
       throw new ApiError('Payment method is required', 400, 'validation_error');
     }
     
+    // Validate method is allowed
+    const validMethods = ['bank_transfer', 'credit_card', 'cryptocurrency'];
+    if (!validMethods.includes(method)) {
+      throw new ApiError(`Invalid payment method: ${method}. Must be one of: ${validMethods.join(', ')}`, 400, 'validation_error');
+    }
+    
+    // Validate transaction ID for crypto deposits
+    if (method === 'cryptocurrency' && !transactionId) {
+      throw new ApiError('Transaction ID is required for cryptocurrency deposits', 400, 'validation_error');
+    }
+    
     // Create deposit transaction
     const deposit = new Transaction({
       user: req.user._id,
@@ -94,22 +114,25 @@ export const createDeposit = async (req, res, next) => {
       currency,
       method,
       status: 'pending',
-      walletAddress,
-      txHash,
-      description: description || `Deposit via ${method}`,
+      txHash: transactionId, // Store blockchain transaction ID
+      reference: `DEP-${Date.now().toString().slice(-6)}`,
+      description: note || `Deposit via ${method}`,
+      metadata: {
+        cryptoType,
+        cryptoAddress,
+        networkType
+      },
       createdAt: new Date()
     });
     
     await deposit.save({ session });
     
+    // Commit transaction
     await session.commitTransaction();
-    
-    // Log the transaction
-    logger.info(`User ${req.user.email} created deposit request for ${amount} ${currency} via ${method}`);
     
     res.status(201).json({
       success: true,
-      message: 'Deposit request created successfully',
+      message: 'Deposit request submitted successfully',
       data: deposit
     });
   } catch (error) {
@@ -121,11 +144,8 @@ export const createDeposit = async (req, res, next) => {
   }
 };
 
-// Cancel deposit request
+// Cancel pending deposit
 export const cancelDeposit = async (req, res, next) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-  
   try {
     const { id } = req.params;
     
@@ -137,129 +157,78 @@ export const cancelDeposit = async (req, res, next) => {
     });
     
     if (!deposit) {
-      throw new ApiError('Pending deposit not found', 404, 'not_found');
+      throw new ApiError('Deposit not found or cannot be cancelled', 404, 'not_found');
     }
     
-    // Update deposit status
     deposit.status = 'cancelled';
-    deposit.updatedAt = new Date();
-    
-    await deposit.save({ session });
-    
-    await session.commitTransaction();
-    
-    logger.info(`User ${req.user.email} cancelled deposit request ${id}`);
+    deposit.description = `${deposit.description} | Cancelled by user`;
+    await deposit.save();
     
     res.status(200).json({
       success: true,
-      message: 'Deposit request cancelled successfully',
+      message: 'Deposit cancelled successfully',
       data: deposit
     });
   } catch (error) {
-    await session.abortTransaction();
     logger.error(`Error cancelling deposit ${req.params.id}:`, error);
     next(error);
-  } finally {
-    session.endSession();
   }
 };
 
-// Get deposit methods (available payment methods)
+// Get deposit methods
 export const getDepositMethods = async (req, res, next) => {
   try {
-    // These could be stored in a database in a real application
-    const depositMethods = [
-      {
-        id: 'bank_transfer',
-        name: 'Bank Transfer',
-        description: 'Transfer directly from your bank account',
-        processingTime: '1-3 business days',
-        minAmount: 100,
+    // This would normally come from the database
+    const methods = [
+      { 
+        id: 'bank_transfer', 
+        name: 'Bank Transfer', 
+        icon: 'bank', 
+        minAmount: 100, 
+        maxAmount: 50000 
+      },
+      { 
+        id: 'credit_card', 
+        name: 'Credit/Debit Card', 
+        icon: 'credit-card', 
+        minAmount: 50, 
+        maxAmount: 10000 
+      },
+      { 
+        id: 'cryptocurrency', 
+        name: 'Cryptocurrency', 
+        icon: 'bitcoin', 
+        minAmount: 20, 
         maxAmount: 100000,
-        fee: '0%',
-        status: 'active',
-        instructions: [
-          'Initiate a transfer from your bank to our account details below',
-          'Use your user ID as reference',
-          'Upload proof of payment for faster processing'
-        ],
-        fields: [
-          { name: 'transferReference', label: 'Transfer Reference', type: 'text', required: true },
-          { name: 'bankName', label: 'Bank Name', type: 'text', required: true }
-        ],
-        accountDetails: {
-          bankName: 'Fidelity First Bank',
-          accountName: 'Fidelity First Brokers Ltd',
-          accountNumber: '1234567890',
-          routingNumber: '123456789',
-          swiftCode: 'FIDLUS22'
-        }
-      },
-      {
-        id: 'credit_card',
-        name: 'Credit/Debit Card',
-        description: 'Instant deposit using Visa, Mastercard, or Amex',
-        processingTime: 'Instant',
-        minAmount: 10,
-        maxAmount: 50000,
-        fee: '2.5%',
-        status: 'active',
-        instructions: [
-          'Enter your card details securely',
-          'Confirm the transaction',
-          'Funds will be added to your account immediately'
-        ],
-        fields: [
-          { name: 'cardNumber', label: 'Card Number', type: 'text', required: true },
-          { name: 'expiryDate', label: 'Expiry Date', type: 'text', required: true },
-          { name: 'cvv', label: 'CVV', type: 'text', required: true },
-          { name: 'nameOnCard', label: 'Name on Card', type: 'text', required: true }
+        cryptoOptions: [
+          { 
+            id: 'bitcoin', 
+            name: 'Bitcoin (BTC)', 
+            address: '3FZbgi29cpjq2GjdwV8eyHuJJnkLtktZc5',
+            networkType: 'Bitcoin Network',
+            confirmations: 3
+          },
+          { 
+            id: 'ethereum', 
+            name: 'Ethereum (ETH)', 
+            address: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
+            networkType: 'ERC-20',
+            confirmations: 12
+          },
+          { 
+            id: 'usdt', 
+            name: 'Tether (USDT)', 
+            address: 'TYW6A8Lfb9uLgtTU3dtjdtW7vCcEYyZJjp',
+            networkType: 'TRC-20',
+            confirmations: 6
+          }
         ]
-      },
-      {
-        id: 'cryptocurrency',
-        name: 'Cryptocurrency',
-        description: 'Deposit via Bitcoin, Ethereum, or USDT',
-        processingTime: '10-60 minutes',
-        minAmount: 50,
-        maxAmount: 1000000,
-        fee: '0%',
-        status: 'active',
-        instructions: [
-          'Select your preferred cryptocurrency',
-          'Send the exact amount to the wallet address provided',
-          'Include the transaction hash for verification'
-        ],
-        fields: [
-          { name: 'txHash', label: 'Transaction Hash', type: 'text', required: true }
-        ],
-        walletAddresses: {
-          BTC: '3FZbgi29cpjq2GjdwV8eyHuJJnkLtktZc5',
-          ETH: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
-          USDT: 'TG9MfLbJAoojpbj6jm7wFUHgbD5AvYhZRD'
-        }
-      },
-      {
-        id: 'paypal',
-        name: 'PayPal',
-        description: 'Quick and secure deposits via PayPal',
-        processingTime: 'Instant',
-        minAmount: 10,
-        maxAmount: 10000,
-        fee: '1.5%',
-        status: 'active',
-        instructions: [
-          'Click the PayPal button to be redirected',
-          'Log in to your PayPal account',
-          'Confirm the payment'
-        ],
-        fields: []
       }
     ];
     
     res.status(200).json({
       success: true,
-      data: depositMethods
+      data: methods
     });
   } catch (error) {
     logger.error('Error fetching deposit methods:', error);
@@ -267,7 +236,7 @@ export const getDepositMethods = async (req, res, next) => {
   }
 };
 
-// Get deposit statistics for the user
+// Get deposit statistics
 export const getDepositStats = async (req, res, next) => {
   try {
     // Total deposits
@@ -331,11 +300,159 @@ export const getDepositStats = async (req, res, next) => {
   }
 };
 
+// Admin functions
+export const adminGetDeposits = async (req, res, next) => {
+  try {
+    // Verify admin privileges
+    if (!req.user.isAdmin) {
+      throw new ApiError('Unauthorized access', 403, 'access_denied');
+    }
+    
+    const { status, userId, method, page = 1, limit = 10 } = req.query;
+    
+    const query = { type: 'deposit' };
+    
+    if (status) {
+      query.status = status;
+    }
+    
+    if (userId) {
+      query.user = userId;
+    }
+    
+    if (method) {
+      query.method = method;
+    }
+    
+    // Execute query with pagination
+    const total = await Transaction.countDocuments(query);
+    const deposits = await Transaction.find(query)
+      .populate('user', 'email firstName lastName')
+      .sort({ createdAt: -1 })
+      .skip((parseInt(page) - 1) * parseInt(limit))
+      .limit(parseInt(limit));
+    
+    res.status(200).json({
+      success: true,
+      data: {
+        deposits,
+        pagination: {
+          total,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          pages: Math.ceil(total / parseInt(limit))
+        }
+      }
+    });
+  } catch (error) {
+    logger.error('Error fetching admin deposits:', error);
+    next(error);
+  }
+};
+
+export const adminApproveDeposit = async (req, res, next) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  
+  try {
+    // Verify admin privileges
+    if (!req.user.isAdmin) {
+      throw new ApiError('Unauthorized access', 403, 'access_denied');
+    }
+    
+    const { id } = req.params;
+    
+    // Find the deposit
+    const deposit = await Transaction.findOne({
+      _id: id,
+      type: 'deposit',
+      status: 'pending'
+    }).session(session);
+    
+    if (!deposit) {
+      throw new ApiError('Deposit not found or already processed', 404, 'not_found');
+    }
+    
+    // Update deposit status
+    deposit.status = 'completed';
+    deposit.processedAt = new Date();
+    deposit.processedBy = req.user._id;
+    await deposit.save({ session });
+    
+    // Update user balance
+    const user = await User.findById(deposit.user).session(session);
+    user.balance += deposit.amount;
+    await user.save({ session });
+    
+    // Commit transaction
+    await session.commitTransaction();
+    
+    res.status(200).json({
+      success: true,
+      message: 'Deposit approved and user balance updated',
+      data: deposit
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    logger.error(`Error approving deposit ${req.params.id}:`, error);
+    next(error);
+  } finally {
+    session.endSession();
+  }
+};
+
+export const adminRejectDeposit = async (req, res, next) => {
+  try {
+    // Verify admin privileges
+    if (!req.user.isAdmin) {
+      throw new ApiError('Unauthorized access', 403, 'access_denied');
+    }
+    
+    const { id } = req.params;
+    const { reason } = req.body;
+    
+    if (!reason) {
+      throw new ApiError('Rejection reason is required', 400, 'validation_error');
+    }
+    
+    // Find the deposit
+    const deposit = await Transaction.findOne({
+      _id: id,
+      type: 'deposit',
+      status: 'pending'
+    });
+    
+    if (!deposit) {
+      throw new ApiError('Deposit not found or already processed', 404, 'not_found');
+    }
+    
+    // Update deposit status
+    deposit.status = 'rejected';
+    deposit.processedAt = new Date();
+    deposit.processedBy = req.user._id;
+    deposit.description = `${deposit.description} | Rejected: ${reason}`;
+    
+    await deposit.save();
+    
+    res.status(200).json({
+      success: true,
+      message: 'Deposit rejected',
+      data: deposit
+    });
+  } catch (error) {
+    logger.error(`Error rejecting deposit ${req.params.id}:`, error);
+    next(error);
+  }
+};
+
 export default {
   getUserDeposits,
   getDepositById,
   createDeposit,
   cancelDeposit,
   getDepositMethods,
-  getDepositStats
+  getDepositStats,
+  adminGetDeposits,
+  adminApproveDeposit,
+  adminRejectDeposit
 };

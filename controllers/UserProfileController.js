@@ -121,7 +121,7 @@ export const getAccountSummary = async (req, res, next) => {
     
     // Create summary object
     const summary = {
-      balance: user.balance || 0,
+      balance: user.balance || 'N/A',
       investmentCount: investments.length,
       investmentTotal,
       depositTotal,
@@ -222,7 +222,7 @@ export const getUserBalance = async (req, res, next) => {
     const userId = req.user.id;
 
     // Fetch user data including the balance
-    const user = await User.findById(userId).select('balance');
+    const user = await User.findById(userId);
     
     if (!user) {
       return res.status(404).json({
@@ -234,7 +234,7 @@ export const getUserBalance = async (req, res, next) => {
     res.status(200).json({
       success: true,
       data: {
-        balance: user.balance || 0
+        balance: user.balance || 'N/A'
       }
     });
   } catch (error) {

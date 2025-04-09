@@ -1,36 +1,26 @@
 import express from 'express';
+import ATMCardsController from '../controllers/ATMCardsController.js';
 import { verifyToken } from '../middleware/auth.js';
-import { asyncHandler } from '../middleware/errorHandler.js';
-import {
-  getUserATMCards,
-  getATMCardById,
-  createATMCardRequest,
-  updateATMCardLimits,
-  cancelATMCardRequest,
-  getATMCardRequests
-} from '../controllers/ATMCardsController.js';
 
 const router = express.Router();
 
-// Apply authentication middleware to all routes
+// All routes require authentication
 router.use(verifyToken);
 
-// Get all ATM cards for a user
-router.get('/', asyncHandler(getUserATMCards));
+// User routes
+router.get('/', ATMCardsController.getAllCards);
+router.get('/:id', ATMCardsController.getCardById);
+router.post('/request', ATMCardsController.requestCard);
+router.post('/:id/cancel', ATMCardsController.cancelCardRequest);
+router.post('/:id/freeze', ATMCardsController.freezeCard);
+router.post('/:id/unfreeze', ATMCardsController.unfreezeCard);
+router.put('/:id/limits', ATMCardsController.updateCardLimits);
+router.get('/:id/transactions', ATMCardsController.getCardTransactions);
 
-// Get ATM card details by ID
-router.get('/:id', asyncHandler(getATMCardById));
-
-// Create a new ATM card request
-router.post('/', asyncHandler(createATMCardRequest));
-
-// Update ATM card limits
-router.put('/:id/limits', asyncHandler(updateATMCardLimits));
-
-// Cancel ATM card request
-router.put('/:id/cancel', asyncHandler(cancelATMCardRequest));
-
-// Get ATM card requests
-router.get('/requests', asyncHandler(getATMCardRequests));
+router.get('/admin/all', ATMCardsController.adminGetAllCards);
+router.get('/admin/:id', ATMCardsController.adminGetCardById);
+router.post('/admin/:id/approve', ATMCardsController.adminApproveCardRequest);
+router.post('/admin/:id/reject', ATMCardsController.adminRejectCardRequest);
+router.put('/admin/:id/status', ATMCardsController.adminUpdateCardStatus);
 
 export default router;

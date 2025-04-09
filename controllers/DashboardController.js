@@ -17,7 +17,7 @@ export const getAccountSummary = async (req, res, next) => {
     }
     
     // Calculate total balance
-    const totalBalance = user.balance || 0;
+    const totalBalance = user.balance;
     
     // Calculate total investments value
     const investments = await Investment.find({ user: user._id, status: 'active' });
@@ -65,7 +65,7 @@ export const getAccountSummary = async (req, res, next) => {
     
     // Format data for response
     const accountSummary = {
-      availableBalance: totalBalance,
+      availableBalance: user.balance || 'N/A',
       totalInvestments,
       totalAssets: totalBalance + totalInvestments,
       projectedEarnings,
