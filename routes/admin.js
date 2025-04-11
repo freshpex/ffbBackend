@@ -6,7 +6,7 @@ import Order from '../models/Order.js';
 import { verifyToken, requireAdmin, requireSuperAdmin } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import logger from '../middleware/logger.js';
-import bcrypt from 'bcrypt';
+import ATMCardsController from '../controllers/ATMCardsController.js';
 import jwt from 'jsonwebtoken';
 import {
   getAllTransactions,
@@ -454,5 +454,12 @@ router.post('/notifications', requireAdmin, [
   check('title', 'Title is required').not().isEmpty(),
   check('message', 'Message is required').not().isEmpty()
 ], AdminNotificationController.createNotification);
+
+
+router.get('/atm-cards/all', ATMCardsController.adminGetAllCards);
+router.get('/atm-cards/:id', ATMCardsController.adminGetCardById);
+router.post('/atm-cards/:id/approve', ATMCardsController.adminApproveCardRequest);
+router.post('/atm-cards/:id/reject', ATMCardsController.adminRejectCardRequest);
+router.put('/atm-cards/:id/status', ATMCardsController.adminUpdateCardStatus);
 
 export default router;

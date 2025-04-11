@@ -285,7 +285,6 @@ export const getCardTransactions = async (req, res, next) => {
 // Admin: Get all cards
 export const adminGetAllCards = async (req, res, next) => {
   try {
-    // Check admin permissions
     if (!['admin', 'superadmin'].includes(req.user.role)) {
       throw new ApiError('Unauthorized access', 403, 'forbidden');
     }

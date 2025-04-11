@@ -122,40 +122,29 @@ export const processTransaction = async (req, res, next) => {
     
     // If approved, update user balance
     if (action === 'approve' && ['deposit', 'withdrawal'].includes(transaction.type)) {
-      const user = await User.findById(transaction.user).session(session);
-      
-      if (!user) {
-        throw new ApiError('User not found', 404, 'not_found');
-      }
-      
       if (transaction.type === 'deposit') {
-        user.balance += Math.abs(transaction.amount);
+        await User.findByIdAndUpdate(
+          transaction.user,
+          { $inc: { balance: Math.abs(transaction.amount) } },
+          { session, new: true }
+        );
+        
         await createTransactionNotification(transaction, req.user);
-        await createTransactionNotification(transaction, user);
-        logger.info(`Admin ${req.user.email} approved deposit of ${Math.abs(transaction.amount)} for user ${user.email}`);
+        logger.info(`Admin ${req.user.email} approved deposit of ${Math.abs(transaction.amount)} for user ID ${transaction.user}`);
       } 
       else if (transaction.type === 'withdrawal') {
-        // For withdrawals, the balance was already deducted when request was created
-        // No need to deduct again, just log
         await createTransactionNotification(transaction, req.user);
-        await createTransactionNotification(transaction, user);
-        logger.info(`Admin ${req.user.email} approved withdrawal of ${Math.abs(transaction.amount)} for user ${user.email}`);
+        logger.info(`Admin ${req.user.email} approved withdrawal of ${Math.abs(transaction.amount)} for user ID ${transaction.user}`);
       }
-      
-      await user.save({ session });
     } 
     else if (action === 'reject' && transaction.type === 'withdrawal') {
-      const user = await User.findById(transaction.user).session(session);
+      await User.findByIdAndUpdate(
+        transaction.user,
+        { $inc: { balance: Math.abs(transaction.amount) } },
+        { session, new: true }
+      );
       
-      if (!user) {
-        throw new ApiError('User not found', 404, 'not_found');
-      }
-      
-      // For withdrawals, refund the amount to user's balance
-      user.balance += Math.abs(transaction.amount);
-      logger.info(`Admin ${req.user.email} rejected withdrawal and refunded ${Math.abs(transaction.amount)} to user ${user.email}`);
-      
-      await user.save({ session });
+      logger.info(`Admin ${req.user.email} rejected withdrawal and refunded ${Math.abs(transaction.amount)} to user ID ${transaction.user}`);
     }
     
     await session.commitTransaction();

@@ -70,7 +70,8 @@ export const getUserProfile = async (req, res) => {
         profileImage: user.profileImage || '',
         phone: user.phone || '',
         address: user.address || '',
-        accountBalance: user.accountBalance || 0,
+        balance: user.balance || 0,
+        accountBalance: user.balance || 0,
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
       }

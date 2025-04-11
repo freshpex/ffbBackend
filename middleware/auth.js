@@ -52,7 +52,7 @@ export const verifyToken = async (req, res, next) => {
 
 // Admin role verification middleware
 export const verifyAdmin = (req, res, next) => {
-  if (!req.user || req.user.role !== 'admin') {
+  if (!req.user || !['admin', 'superadmin'].includes(req.user.role)) {
     return next(new ApiError('Access denied. Admin privileges required', 403, 'forbidden'));
   }
   next();

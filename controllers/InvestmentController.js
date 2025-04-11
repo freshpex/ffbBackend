@@ -16,7 +16,7 @@ const INVESTMENT_PLANS = [
     duration: 30,
     features: ['Lower risk', 'Fixed returns', 'Monthly payouts'],
     description: 'Our entry-level investment plan designed for beginners. Start your investment journey with minimal risk and steady returns.',
-    roi: '5% monthly'
+    roi: 5
   },
   {
     id: 'standard',
@@ -27,7 +27,7 @@ const INVESTMENT_PLANS = [
     duration: 60,
     features: ['Moderate risk', 'Higher returns', 'Bi-weekly payouts'],
     description: 'Balanced investment option for experienced investors looking for better returns with manageable risk levels.',
-    roi: '8% monthly'
+    roi: 8
   },
   {
     id: 'premium',
@@ -38,7 +38,7 @@ const INVESTMENT_PLANS = [
     duration: 90,
     features: ['Strategic investments', 'Premium returns', 'Weekly payouts', 'Priority support'],
     description: 'Our premium offering for serious investors. High returns with expert portfolio management and exclusive benefits.',
-    roi: '12% monthly'
+    roi: 12
   }
 ];
 
@@ -184,9 +184,11 @@ export const createInvestment = async (req, res, next) => {
 
     await investment.save({ session });
 
-    // Deduct amount from user balance
-    user.balance -= amount;
-    await user.save({ session });
+    await User.findByIdAndUpdate(
+      user._id,
+      { $inc: { balance: -amount } },
+      { session }
+    );
 
     // Create transaction record
     const transaction = new Transaction({

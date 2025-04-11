@@ -17,10 +17,4 @@ router.post('/:id/unfreeze', ATMCardsController.unfreezeCard);
 router.put('/:id/limits', ATMCardsController.updateCardLimits);
 router.get('/:id/transactions', ATMCardsController.getCardTransactions);
 
-router.get('/admin/all', ATMCardsController.adminGetAllCards);
-router.get('/admin/:id', ATMCardsController.adminGetCardById);
-router.post('/admin/:id/approve', ATMCardsController.adminApproveCardRequest);
-router.post('/admin/:id/reject', ATMCardsController.adminRejectCardRequest);
-router.put('/admin/:id/status', ATMCardsController.adminUpdateCardStatus);
-
 export default router;

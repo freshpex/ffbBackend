@@ -74,7 +74,7 @@ export const createWithdrawal = async (req, res, next) => {
   session.startTransaction();
   
   try {
-    const { amount, method, currency = 'USD', walletAddress, bankDetails, description } = req.body;
+    const { amount, method, currency = 'USD', walletAddress, bankDetails, paypalEmail, cryptoType, description } = req.body;
     
     // Validate amount
     if (!amount || isNaN(amount) || amount <= 0) {
@@ -87,13 +87,20 @@ export const createWithdrawal = async (req, res, next) => {
     }
     
     // Check if crypto withdrawal requires wallet address
-    if (['cryptocurrency', 'bitcoin', 'ethereum', 'usdt'].includes(method.toLowerCase()) && !walletAddress) {
-      throw new ApiError('Wallet address is required for cryptocurrency withdrawals', 400, 'validation_error');
+    if (['cryptocurrency', 'bitcoin', 'ethereum', 'usdt'].includes(method.toLowerCase())) {
+      if (!walletAddress) {
+        throw new ApiError('Wallet address is required for cryptocurrency withdrawals', 400, 'validation_error');
+      }
     }
     
     // Check if bank transfer requires bank details
     if (method.toLowerCase() === 'bank_transfer' && !bankDetails) {
       throw new ApiError('Bank details are required for bank transfer withdrawals', 400, 'validation_error');
+    }
+    
+    // Check if paypal requires email
+    if (method.toLowerCase() === 'paypal' && !paypalEmail) {
+      throw new ApiError('Email is required for PayPal withdrawals', 400, 'validation_error');
     }
     
     // Check if user has sufficient balance
@@ -114,7 +121,12 @@ export const createWithdrawal = async (req, res, next) => {
     
     // Deduct amount from user balance
     user.balance -= totalAmount;
-    await user.save({ session });
+    
+    await User.updateOne(
+      { _id: user._id },
+      { $set: { balance: user.balance } },
+      { session }
+    );
     
     // Create withdrawal transaction
     const withdrawal = new Transaction({
@@ -125,6 +137,8 @@ export const createWithdrawal = async (req, res, next) => {
       currency,
       method,
       walletAddress,
+      cryptoType,
+      paypalEmail,
       bankDetails,
       status: 'pending',
       description: description || `Withdrawal via ${method}`,
@@ -203,8 +217,11 @@ export const cancelWithdrawal = async (req, res, next) => {
       throw new ApiError('User not found', 404, 'not_found');
     }
     
-    user.balance += originalAmount;
-    await user.save({ session });
+    await User.updateOne(
+      { _id: user._id },
+      { $inc: { balance: originalAmount } },
+      { session }
+    );
     
     // Create refund transaction
     const refundTransaction = new Transaction({
