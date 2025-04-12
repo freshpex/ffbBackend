@@ -7,7 +7,9 @@ import {
   getUserInvestments,
   createInvestment,
   getInvestmentById,
-  getInvestmentStatistics
+  getInvestmentStatistics,
+  cancelInvestment,
+  withdrawInvestment
 } from '../controllers/InvestmentController.js';
 
 const router = express.Router();
@@ -36,6 +38,12 @@ router.get('/', asyncHandler(getUserInvestments));
 
 // Create a new investment
 router.post('/', asyncHandler(createInvestment));
+
+// Cancel an investment
+router.post('/:id/cancel', asyncHandler(cancelInvestment));
+
+// Withdraw an investment early
+router.post('/:id/withdraw', asyncHandler(withdrawInvestment));
 
 // Get specific investment details
 router.get('/:id', asyncHandler(getInvestmentById));

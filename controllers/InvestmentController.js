@@ -91,24 +91,64 @@ export const getUserInvestments = async (req, res) => {
   try {
     const userId = req.user.id;
     
-    const investments = await Investment.find({ userId })
-      .sort({ createdAt: -1 })
-      .populate('planId');
+    const investments = await Investment.find({ user: userId })
+      .sort({ createdAt: -1 });
+    
+    const processedInvestments = investments.map(investment => {
+      const investmentObj = investment.toObject();
+      
+      const plan = INVESTMENT_PLANS.find(p => p.id === investment.planId);
+      if (!plan) {
+        return {
+          ...investmentObj,
+          planName: 'Unknown Plan'
+        };
+      }
+      
+      investmentObj.planName = plan.name;
+      
+      if (investment.status === 'active') {
+        const currentDate = new Date();
+        const startDate = new Date(investment.startDate);
+        const endDate = new Date(investment.endDate);
+        const totalDuration = endDate - startDate;
+        const elapsedDuration = currentDate - startDate;
+        
+        // Progress percentage
+        const progress = Math.min(Math.round((elapsedDuration / totalDuration) * 100), 100);
+        investmentObj.progress = progress;
+        
+        // Expected return at maturity
+        const expectedReturn = (investment.returnRate / 100) * investment.amount;
+        investmentObj.expectedReturn = expectedReturn;
+        
+        // Current value based on progress
+        const proRatedReturn = expectedReturn * (progress / 100);
+        investmentObj.currentValue = investment.amount + proRatedReturn;
+      } 
+      // Completed investments, calculate return amount
+      else if (investment.status === 'completed') {
+        investmentObj.returnAmount = investment.totalReturns || 
+          ((investment.returnRate / 100) * investment.amount);
+      }
+      
+      return investmentObj;
+    });
     
     // Separate active and completed investments
-    const active = investments.filter(inv => 
+    const active = processedInvestments.filter(inv => 
       inv.status === 'active' || inv.status === 'pending'
     );
     
-    const history = investments.filter(inv => 
+    const history = processedInvestments.filter(inv => 
       inv.status === 'completed' || inv.status === 'cancelled'
     );
     
     // Calculate statistics
-    const totalInvested = investments.reduce((sum, inv) => sum + inv.amount, 0);
-    const totalEarnings = investments
+    const totalInvested = processedInvestments.reduce((sum, inv) => sum + inv.amount, 0);
+    const totalEarnings = processedInvestments
       .filter(inv => inv.status === 'completed')
-      .reduce((sum, inv) => sum + (inv.earnings || 0), 0);
+      .reduce((sum, inv) => sum + (inv.returnAmount || 0), 0);
     
     return res.status(200).json({
       success: true,
@@ -254,8 +294,8 @@ export const getInvestmentStatistics = async (req, res) => {
     // Get the user ID from the authenticated user 
     const userId = req.user.id;
     
-    // Query investments for this user
-    const investments = await Investment.find({ userId });
+    // Query investments for this user using the correct field name 'user'
+    const investments = await Investment.find({ user: userId });
     
     // Calculate statistics
     const totalInvestments = investments.length;
@@ -284,11 +324,157 @@ export const getInvestmentStatistics = async (req, res) => {
   }
 };
 
+// Cancel investment function
+export const cancelInvestment = async (req, res, next) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  
+  try {
+    const { id } = req.params;
+    
+    const investment = await Investment.findOne({
+      _id: id,
+      user: req.user._id,
+      status: 'active'
+    }).session(session);
+    
+    if (!investment) {
+      throw new ApiError('Active investment not found', 404, 'not_found');
+    }
+    
+    investment.status = 'cancelled';
+    await investment.save({ session });
+    
+    const refundAmount = investment.amount;
+    
+    await User.findByIdAndUpdate(
+      req.user._id,
+      { $inc: { balance: refundAmount } },
+      { session }
+    );
+    
+    const transaction = new Transaction({
+      user: req.user._id,
+      type: 'deposit',
+      amount: refundAmount,
+      currency: 'USD',
+      status: 'completed',
+      method: 'system',
+      description: `Refund for cancelled investment: ${investment.planId}`,
+      reference: investment._id.toString(),
+      processedAt: new Date()
+    });
+    
+    await transaction.save({ session });
+    
+    await session.commitTransaction();
+    
+    res.status(200).json({
+      success: true,
+      message: 'Investment cancelled successfully',
+      data: {
+        refundAmount,
+        investment
+      }
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    logger.error('Error cancelling investment:', error);
+    next(error);
+  } finally {
+    session.endSession();
+  }
+};
+
+// Withdraw investment function (early withdrawal)
+export const withdrawInvestment = async (req, res, next) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  
+  try {
+    const { id } = req.params;
+    
+    // Find the investment and ensure it belongs to the user
+    const investment = await Investment.findOne({
+      _id: id,
+      user: req.user._id,
+      status: 'active'
+    }).session(session);
+    
+    if (!investment) {
+      throw new ApiError('Active investment not found', 404, 'not_found');
+    }
+    
+    // Calculate current value based on time elapsed
+    const currentDate = new Date();
+    const startDate = new Date(investment.startDate);
+    const endDate = new Date(investment.endDate);
+    const totalDuration = endDate - startDate;
+    const elapsedDuration = currentDate - startDate;
+    const progressPercentage = Math.min(Math.max(elapsedDuration / totalDuration, 0), 1);
+    
+    // Calculate returns (pro-rated based on time invested)
+    const principalAmount = investment.amount;
+    const fullReturnAmount = (investment.returnRate / 100) * principalAmount;
+    const proRatedReturn = fullReturnAmount * progressPercentage;
+    const withdrawalAmount = principalAmount + proRatedReturn;
+    
+    // Update investment status
+    investment.status = 'completed';
+    investment.totalReturns = proRatedReturn;
+    investment.endDate = currentDate;
+    await investment.save({ session });
+    
+    // Add the withdrawal amount to user's balance
+    await User.findByIdAndUpdate(
+      req.user._id,
+      { $inc: { balance: withdrawalAmount } },
+      { session }
+    );
+    
+    // Create transaction record for the withdrawal
+    const transaction = new Transaction({
+      user: req.user._id,
+      type: 'deposit',
+      amount: withdrawalAmount,
+      currency: 'USD',
+      status: 'completed',
+      method: 'system',
+      description: `Early withdrawal from investment: ${investment.planId} (principal + pro-rated returns)`,
+      reference: investment._id.toString(),
+      processedAt: new Date()
+    });
+    
+    await transaction.save({ session });
+    
+    await session.commitTransaction();
+    
+    res.status(200).json({
+      success: true,
+      message: 'Investment withdrawn successfully',
+      data: {
+        principalAmount,
+        returnAmount: proRatedReturn,
+        totalAmount: withdrawalAmount,
+        investment
+      }
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    logger.error('Error withdrawing investment:', error);
+    next(error);
+  } finally {
+    session.endSession();
+  }
+};
+
 export default {
   getInvestmentPlans,
   getInvestmentPlanById,
   getUserInvestments,
   createInvestment,
   getInvestmentById,
-  getInvestmentStatistics
+  getInvestmentStatistics,
+  cancelInvestment,
+  withdrawInvestment
 };

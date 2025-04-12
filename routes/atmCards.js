@@ -16,5 +16,7 @@ router.post('/:id/freeze', ATMCardsController.freezeCard);
 router.post('/:id/unfreeze', ATMCardsController.unfreezeCard);
 router.put('/:id/limits', ATMCardsController.updateCardLimits);
 router.get('/:id/transactions', ATMCardsController.getCardTransactions);
+router.post('/:id/transactions', ATMCardsController.createCardTransaction);
+router.post('/:id/fund', ATMCardsController.fundCardFromBalance);
 
 export default router;

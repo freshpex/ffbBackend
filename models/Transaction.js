@@ -26,7 +26,7 @@ const transactionSchema = new mongoose.Schema({
   },
   method: {
     type: String,
-    enum: ['bank_transfer', 'credit_card', 'cryptocurrency', 'internal', 'system']
+    enum: ['bank_transfer', 'credit_card', 'cryptocurrency', 'internal', 'system', 'fee', 'paypal'],
   },
   walletAddress: String,
   txHash: String,

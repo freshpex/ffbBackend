@@ -258,6 +258,7 @@ export const getCardTransactions = async (req, res, next) => {
   try {
     const { id } = req.params;
     const userId = req.user._id;
+    const { page = 1, limit = 10, category, type, startDate, endDate } = req.query;
     
     const card = await ATMCard.findOne({ _id: id, user: userId });
     
@@ -265,17 +266,266 @@ export const getCardTransactions = async (req, res, next) => {
       throw new ApiError('Card not found', 404, 'not_found');
     }
     
-    const transactions = await Transaction.find({ 
+    // Build query
+    const query = { 
       cardId: id, 
       user: userId 
-    }).sort({ createdAt: -1 });
+    };
+    
+    // Add optional filters
+    if (category) query.category = category;
+    if (type) query.type = type;
+    if (startDate || endDate) {
+      query.createdAt = {};
+      if (startDate) query.createdAt.$gte = new Date(startDate);
+      if (endDate) query.createdAt.$lte = new Date(endDate);
+    }
+    
+    // Pagination
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    
+    // Get transactions count
+    const total = await Transaction.countDocuments(query);
+    
+    // Get transactions
+    const transactions = await Transaction.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
     
     res.status(200).json({
       success: true,
-      data: transactions
+      data: transactions,
+      pagination: {
+        total,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        pages: Math.ceil(total / parseInt(limit))
+      }
     });
   } catch (error) {
     logger.error(`Error fetching card transactions ${req.params.id}:`, error);
+    next(error);
+  }
+};
+
+// Create a card transaction
+export const createCardTransaction = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user._id;
+    const { 
+      amount, 
+      merchantName, 
+      merchantId,
+      category,
+      type = 'purchase',
+      description
+    } = req.body;
+    
+    // Validate required fields
+    if (!amount || amount <= 0) {
+      throw new ApiError('Valid transaction amount is required', 400, 'validation_error');
+    }
+    
+    if (!merchantName) {
+      throw new ApiError('Merchant name is required', 400, 'validation_error');
+    }
+    
+    // Validate transaction type
+    const validTypes = ['purchase', 'refund', 'withdrawal', 'deposit'];
+    if (!validTypes.includes(type)) {
+      throw new ApiError(`Invalid transaction type. Must be one of: ${validTypes.join(', ')}`, 400, 'validation_error');
+    }
+    
+    // Find the card
+    const card = await ATMCard.findOne({ _id: id, user: userId });
+    
+    if (!card) {
+      throw new ApiError('Card not found', 404, 'not_found');
+    }
+    
+    // Check card status
+    if (card.status !== 'active') {
+      throw new ApiError(`Cannot create transaction with card in ${card.status} status`, 400, 'invalid_card_status');
+    }
+    
+    // For purchase and withdrawal, check balance and limits
+    if (type === 'purchase' || type === 'withdrawal') {
+      // Check card balance
+      if (card.balance < amount) {
+        throw new ApiError('Insufficient card balance', 400, 'insufficient_funds');
+      }
+      
+      // Check daily limit
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      const todayTransactions = await Transaction.find({
+        cardId: id,
+        user: userId,
+        type: { $in: ['purchase', 'withdrawal'] },
+        createdAt: { $gte: today }
+      });
+      
+      const todaySpent = todayTransactions.reduce((total, tx) => total + tx.amount, 0);
+      
+      if (todaySpent + amount > card.limits.daily) {
+        throw new ApiError('Transaction exceeds daily limit', 400, 'limit_exceeded');
+      }
+      
+      // Check monthly limit
+      const firstDayOfMonth = new Date();
+      firstDayOfMonth.setDate(1);
+      firstDayOfMonth.setHours(0, 0, 0, 0);
+      
+      const monthTransactions = await Transaction.find({
+        cardId: id,
+        user: userId,
+        type: { $in: ['purchase', 'withdrawal'] },
+        createdAt: { $gte: firstDayOfMonth }
+      });
+      
+      const monthSpent = monthTransactions.reduce((total, tx) => total + tx.amount, 0);
+      
+      if (monthSpent + amount > card.limits.monthly) {
+        throw new ApiError('Transaction exceeds monthly limit', 400, 'limit_exceeded');
+      }
+    }
+    
+    // Create transaction
+    const transaction = new Transaction({
+      transactionId: uuidv4(),
+      user: userId,
+      cardId: id,
+      amount,
+      merchantName,
+      merchantId: merchantId || `merchant_${Date.now()}`,
+      category: category || 'other',
+      type,
+      description: description || `${type} at ${merchantName}`,
+      status: 'completed',
+      currency: card.currency || 'USD',
+      date: new Date()
+    });
+    
+    await transaction.save();
+    
+    // Update card balance for purchase/withdrawal
+    if (type === 'purchase' || type === 'withdrawal') {
+      card.balance -= amount;
+      
+      // Update daily and monthly usage
+      card.limits.dailyUsed = (card.limits.dailyUsed || 0) + amount;
+      card.limits.monthlyUsed = (card.limits.monthlyUsed || 0) + amount;
+      
+      await card.save();
+      
+      // Update user's main balance as well
+      const user = await User.findById(userId);
+      if (user) {
+        user.balance -= amount;
+        await user.save();
+      }
+    } 
+    // Handle refunds/deposits
+    else if (type === 'refund' || type === 'deposit') {
+      card.balance += amount;
+      await card.save();
+      
+      // Update user's main balance for deposits
+      if (type === 'deposit') {
+        const user = await User.findById(userId);
+        if (user) {
+          user.balance += amount;
+          await user.save();
+        }
+      }
+    }
+    
+    res.status(201).json({
+      success: true,
+      message: `Card transaction created successfully`,
+      transaction
+    });
+  } catch (error) {
+    logger.error(`Error creating card transaction for card ${req.params.id}:`, error);
+    next(error);
+  }
+};
+
+export const fundCardFromBalance = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user._id;
+    const { amount } = req.body;
+    
+    if (!amount || amount <= 0) {
+      throw new ApiError('Valid amount is required', 400, 'validation_error');
+    }
+    
+    const card = await ATMCard.findOne({ _id: id, user: userId });
+    
+    if (!card) {
+      throw new ApiError('Card not found', 404, 'not_found');
+    }
+    
+    // Check card status
+    if (card.status !== 'active') {
+      throw new ApiError(`Cannot fund card in ${card.status} status`, 400, 'invalid_card_status');
+    }
+    
+    // Find user and check balance
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      throw new ApiError('User not found', 404, 'not_found');
+    }
+    
+    if (user.balance < amount) {
+      throw new ApiError('Insufficient balance in your account', 400, 'insufficient_funds');
+    }
+    
+    // Create transaction to record the funding
+    const transaction = new Transaction({
+      transactionId: uuidv4(),
+      user: userId,
+      cardId: id,
+      amount: amount,
+      merchantName: 'FFB Self-Funding',
+      merchantId: `ffb_fund_${Date.now()}`,
+      category: 'transfer',
+      type: 'deposit',
+      description: 'Card funding from account balance',
+      status: 'completed',
+      currency: card.currency || 'USD',
+      date: new Date()
+    });
+    
+    await transaction.save();
+    
+    // Update card balance
+    card.balance += amount;
+    await card.save();
+    
+    // Update user's main balance
+    user.balance -= amount;
+    await user.save();
+    
+    res.status(200).json({
+      success: true,
+      message: 'Card funded successfully',
+      data: {
+        card: {
+          id: card._id,
+          balance: card.balance
+        },
+        transaction: transaction,
+        userBalance: user.balance
+      }
+    });
+  } catch (error) {
+    logger.error(`Error funding card ${req.params.id}:`, error);
     next(error);
   }
 };
@@ -520,6 +770,8 @@ export default {
   unfreezeCard,
   updateCardLimits,
   getCardTransactions,
+  createCardTransaction,
+  fundCardFromBalance,
   
   // Admin methods
   adminGetAllCards,
