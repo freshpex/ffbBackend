@@ -109,14 +109,29 @@ export const addCryptoWallet = async (req, res, next) => {
 // Add new card (placeholder - in real app would integrate with payment processor)
 export const addCard = async (req, res, next) => {
   try {
-    const { cardholderName, cardNumber, expiryMonth, expiryYear, nickname } = req.body;
+    const { cardholderName, cardNumber, expiryMonth, expiryYear, expiryDate, nickname } = req.body;
+    
+    let month, year;
+    
+    if (expiryDate) {
+      const parts = expiryDate.split('/');
+      if (parts.length === 2) {
+        month = parts[0].trim();
+        year = parts[1].trim();
+        if (year.length === 2) {
+          year = `20${year}`;
+        }
+      }
+    } else {
+      month = expiryMonth;
+      year = expiryYear;
+    }
     
     // Validate required fields
-    if (!cardholderName || !cardNumber || !expiryMonth || !expiryYear) {
+    if (!cardholderName || !cardNumber || (!month || !year)) {
       throw new ApiError('Cardholder name, card number, and expiry date are required', 400, 'validation_error');
     }
     
-    // Basic validation of card number - should be handled by payment processor in real app
     if (cardNumber.replace(/\s/g, '').length < 13) {
       throw new ApiError('Invalid card number', 400, 'validation_error');
     }
@@ -131,14 +146,13 @@ export const addCard = async (req, res, next) => {
       details: {
         cardholderName,
         cardNumber: maskedCardNumber,
-        expiryMonth,
-        expiryYear
+        expiryMonth: month,
+        expiryYear: year
       },
       isDefault: false, // Will set as default if it's the first one
       addedAt: new Date()
     });
     
-    // Check if this is the first payment method and set as default if so
     const existingMethods = await PaymentMethod.countDocuments({ user: req.user._id });
     if (existingMethods === 0) {
       card.isDefault = true;
@@ -251,9 +265,7 @@ export const deletePaymentMethod = async (req, res, next) => {
       throw new ApiError('Payment method not found', 404, 'not_found');
     }
     
-    // Check if it's the default payment method
     if (paymentMethod.isDefault) {
-      // Find another payment method to set as default
       const anotherPaymentMethod = await PaymentMethod.findOne({
         user: req.user._id,
         _id: { $ne: id }

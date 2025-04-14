@@ -71,7 +71,7 @@ export const getAccountSummary = async (req, res, next) => {
       projectedEarnings,
       totalDeposits: totalDeposits[0]?.total || 0,
       totalWithdrawals: totalWithdrawals[0]?.total || 0,
-      currency: 'USD', // Assuming USD as default
+      currency: 'USD',
       accountNumber: user.accountNumber || 'N/A',
       accountType: user.accountType || 'Standard'
     };

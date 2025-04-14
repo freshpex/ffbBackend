@@ -8,38 +8,25 @@ const paymentMethodSchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ['card', 'bank_account', 'crypto', 'paypal'],
+    enum: ['card', 'bank_account', 'crypto_wallet', 'paypal'],
     required: true
   },
-  name: {
+  nickname: {
     type: String,
     required: true
   },
-  last4: {
-    type: String,
+  details: {
+    type: mongoose.Schema.Types.Mixed,
     required: true
   },
   isDefault: {
     type: Boolean,
     default: false
   },
-  // Card specific fields
-  expiryMonth: {
-    type: Number,
-    min: 1,
-    max: 12
+  addedAt: {
+    type: Date,
+    default: Date.now
   },
-  expiryYear: {
-    type: Number,
-    min: 2000
-  },
-  cardholderName: String,
-  brand: String,
-  bankName: String,
-  accountName: String,
-  routingNumber: String,
-  cryptoAddress: String,
-  network: String,
   status: {
     type: String,
     enum: ['active', 'expired', 'disabled'],

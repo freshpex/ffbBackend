@@ -2,6 +2,7 @@ import http from 'http';
 import mongoose from 'mongoose';
 import app from './app.js';
 import setupWebsocket from './services/websocket.js';
+import priceAlertService from './services/priceAlertService.js';
 import logger from './middleware/logger.js';
 
 const PORT = process.env.PORT || 5000;
@@ -49,6 +50,9 @@ const initServer = async () => {
     // Initialize WebSocket server
     const websocketService = setupWebsocket(server);
     
+    // Start the price alert checking service (check every 5 minutes)
+    priceAlertService.start(5 * 60 * 1000);
+    
     // Start the server
     server.listen(PORT, () => {
       logger.info(`Server running in ${ENV} mode on port ${PORT}`);
@@ -73,6 +77,19 @@ process.on('uncaughtException', (err) => {
   setTimeout(() => {
     process.exit(1);
   }, 1000);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  logger.info('SIGTERM received, shutting down gracefully');
+  
+  // Stop the price alert service
+  priceAlertService.stop();
+  
+  server.close(() => {
+    logger.info('Server closed');
+    process.exit(0);
+  });
 });
 
 // Initialize server

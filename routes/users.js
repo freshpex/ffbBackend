@@ -35,6 +35,7 @@ router.get('/security/status', asyncHandler(UserSecurityController.getSecuritySt
 
 // User payment methods routes
 router.get('/payment-methods', asyncHandler(UserPaymentMethodsController.getUserPaymentMethods));
+router.post('/payment-methods', asyncHandler(UserPaymentMethodsController.addCard)); // Added generic payment method POST route
 router.post('/payment-methods/bank', asyncHandler(UserPaymentMethodsController.addBankAccount));
 router.post('/payment-methods/crypto', asyncHandler(UserPaymentMethodsController.addCryptoWallet));
 router.post('/payment-methods/card', asyncHandler(UserPaymentMethodsController.addCard));

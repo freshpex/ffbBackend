@@ -508,9 +508,12 @@ export const fundCardFromBalance = async (req, res, next) => {
     card.balance += amount;
     await card.save();
     
-    // Update user's main balance
-    user.balance -= amount;
-    await user.save();
+    // Update user's main balance using findByIdAndUpdate to avoid validation
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      { $inc: { balance: -amount } },
+      { new: true }
+    );
     
     res.status(200).json({
       success: true,
@@ -521,7 +524,7 @@ export const fundCardFromBalance = async (req, res, next) => {
           balance: card.balance
         },
         transaction: transaction,
-        userBalance: user.balance
+        userBalance: updatedUser.balance
       }
     });
   } catch (error) {

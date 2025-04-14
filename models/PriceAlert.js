@@ -39,6 +39,20 @@ const priceAlertSchema = new mongoose.Schema(
       type: Boolean,
       default: false
     },
+    notificationMethods: {
+      app: {
+        type: Boolean,
+        default: true
+      },
+      email: {
+        type: Boolean,
+        default: false
+      },
+      sms: {
+        type: Boolean,
+        default: false
+      }
+    },
     createdAt: {
       type: Date,
       default: Date.now
