@@ -40,7 +40,6 @@ export const setupRedisCache = (app, redisClient) => {
     const cacheKey = `api:${req.originalUrl}`;
     
     try {
-      // Try to get cached response
       const cachedResponse = await redisClient.get(cacheKey);
       
       if (cachedResponse) {
@@ -70,7 +69,7 @@ export const setupRedisCache = (app, redisClient) => {
       next();
     } catch (err) {
       logger.error('Cache middleware error:', err);
-      next(); // Proceed without caching
+      next();
     }
   });
 };
@@ -80,7 +79,6 @@ export const clearCache = async (redisClient, pattern) => {
   if (!redisClient || !redisClient.isReady) return;
   
   try {
-    // Get keys that match pattern
     const keys = await redisClient.keys(`api:${pattern}*`);
     
     if (keys.length > 0) {

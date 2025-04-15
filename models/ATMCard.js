@@ -45,6 +45,20 @@ const atmCardSchema = new mongoose.Schema({
   cvv: {
     type: String
   },
+  cardDesign: {
+    primaryColor: {
+      type: String,
+      default: null
+    },
+    secondaryColor: {
+      type: String,
+      default: null
+    },
+    useCustomColors: {
+      type: Boolean,
+      default: false
+    }
+  },
   billingAddress: {
     street: String,
     city: String,

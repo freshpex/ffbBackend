@@ -103,7 +103,7 @@ export const schemas = {
       },
       method: {
         isIn: {
-          options: [['bitcoin', 'ethereum', 'litecoin', 'bank']],
+          options: [['bitcoin', 'ethereum', 'litecoin', 'bank', 'deposit', 'refund', 'withdrawal', 'purchase']],
           errorMessage: 'Invalid withdrawal method'
         }
       },

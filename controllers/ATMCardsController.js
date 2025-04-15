@@ -71,7 +71,8 @@ export const requestCard = async (req, res, next) => {
       type = 'virtual-debit', 
       name = `${req.user.firstName} ${req.user.lastName}`,
       shippingAddress, 
-      billingAddress 
+      billingAddress,
+      cardDesign
     } = req.body;
     
     // Check if user has reached card limit
@@ -110,6 +111,14 @@ export const requestCard = async (req, res, next) => {
       shippingAddress: shippingAddress || {},
       billingAddress: billingAddress || {}
     });
+
+    if (cardDesign && (cardDesign.primaryColor || cardDesign.secondaryColor)) {
+      newCard.cardDesign = {
+        primaryColor: cardDesign.primaryColor || null,
+        secondaryColor: cardDesign.secondaryColor || null,
+        useCustomColors: true
+      };
+    }
     
     await newCard.save();
     
@@ -533,6 +542,45 @@ export const fundCardFromBalance = async (req, res, next) => {
   }
 };
 
+// Update card design/colors
+export const updateCardDesign = async (req, res, next) => {
+  try {
+    const userId = req.user._id;
+    const { cardId } = req.params;
+    const { primaryColor, secondaryColor } = req.body;
+    
+    // Validate at least one color is provided
+    if (!primaryColor && !secondaryColor) {
+      throw new ApiError('At least one color must be provided', 400, 'validation_error');
+    }
+    
+    // Find the card and ensure it belongs to the user
+    const card = await ATMCard.findOne({ _id: cardId, user: userId });
+    
+    if (!card) {
+      throw new ApiError('Card not found or you do not have permission to update this card', 404, 'not_found');
+    }
+    
+    // Update card design
+    card.cardDesign = {
+      primaryColor: primaryColor || card.cardDesign?.primaryColor || null,
+      secondaryColor: secondaryColor || card.cardDesign?.secondaryColor || null,
+      useCustomColors: true
+    };
+    
+    await card.save();
+    
+    res.status(200).json({
+      success: true,
+      message: 'Card design updated successfully',
+      data: card
+    });
+  } catch (error) {
+    logger.error('Error updating card design:', error);
+    next(error);
+  }
+};
+
 // ADMIN METHODS
 
 // Admin: Get all cards
@@ -775,6 +823,7 @@ export default {
   getCardTransactions,
   createCardTransaction,
   fundCardFromBalance,
+  updateCardDesign,
   
   // Admin methods
   adminGetAllCards,
