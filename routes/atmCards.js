@@ -18,5 +18,6 @@ router.put('/:id/limits', ATMCardsController.updateCardLimits);
 router.get('/:id/transactions', ATMCardsController.getCardTransactions);
 router.post('/:id/transactions', ATMCardsController.createCardTransaction);
 router.post('/:id/fund', ATMCardsController.fundCardFromBalance);
+router.post('/:id/iterate', ATMCardsController.iterateVirtualCard);
 
 export default router;

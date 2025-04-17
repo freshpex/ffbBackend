@@ -133,6 +133,90 @@ export const requestCard = async (req, res, next) => {
   }
 };
 
+// Iterate a virtual card (generate new card details)
+export const iterateVirtualCard = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user._id;
+    const { reason } = req.body;
+    
+    const card = await ATMCard.findOne({ _id: id, user: userId });
+    
+    if (!card) {
+      throw new ApiError('Card not found', 404, 'not_found');
+    }
+    
+    // Check if card is virtual
+    if (card.type !== 'virtual-debit') {
+      throw new ApiError('Only virtual cards can be iterated', 400, 'invalid_operation');
+    }
+    
+    // Check card status
+    if (card.status !== 'active') {
+      throw new ApiError('Card must be active to iterate', 400, 'invalid_status');
+    }
+    
+    // Check if card is frozen
+    if (card.frozen) {
+      throw new ApiError('Cannot iterate a frozen card', 400, 'card_frozen');
+    }
+    
+    // Save current card details to history
+    const currentCardDetails = {
+      cardNumber: card.cardNumber,
+      cvv: card.cvv,
+      expiryDate: card.expiryDate,
+      createdAt: card.lastIteratedAt || card.createdAt,
+      reason: reason || 'User requested new card details'
+    };
+    
+    // Generate new card details
+    const newCardNumber = generateCardNumber();
+    const newExpiryDate = getExpiryDate();
+    const newCVV = generateCVV();
+    
+    // Update card with new details
+    card.cardHistory = card.cardHistory || [];
+    card.cardHistory.push(currentCardDetails);
+    card.cardNumber = newCardNumber;
+    card.expiryDate = newExpiryDate;
+    card.cvv = newCVV;
+    card.iterationCount += 1;
+    card.lastIteratedAt = new Date();
+    
+    await card.save();
+    
+    // Create a transaction record for the card iteration
+    const transaction = new Transaction({
+      user: userId,
+      type: 'system',
+      category: 'card_iteration',
+      description: `Virtual card ${card.cardNumber.slice(-4)} details refreshed`,
+      status: 'completed',
+      metadata: {
+        cardId: card._id,
+        iterationCount: card.iterationCount,
+        reason
+      }
+    });
+    
+    await transaction.save();
+    
+    res.status(200).json({
+      success: true,
+      message: 'Virtual card details refreshed successfully',
+      data: {
+        cardId: card._id,
+        iterationCount: card.iterationCount,
+        lastIteratedAt: card.lastIteratedAt
+      }
+    });
+  } catch (error) {
+    logger.error(`Error iterating virtual card ${req.params.id}:`, error);
+    next(error);
+  }
+};
+
 // Cancel card request
 export const cancelCardRequest = async (req, res, next) => {
   try {
@@ -816,6 +900,7 @@ export default {
   getAllCards,
   getCardById,
   requestCard,
+  iterateVirtualCard,
   cancelCardRequest,
   freezeCard,
   unfreezeCard,

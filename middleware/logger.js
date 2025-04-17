@@ -1,5 +1,4 @@
 import winston from 'winston';
-import 'winston-daily-rotate-file';
 
 // Define log levels
 const levels = {
@@ -20,14 +19,6 @@ const format = winston.format.combine(
   })
 );
 
-// Log file configuration
-const fileRotateTransport = new winston.transports.DailyRotateFile({
-  filename: 'logs/application-%DATE%.log',
-  datePattern: 'YYYY-MM-DD',
-  maxFiles: '14d',
-  level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
-});
-
 // Console transport
 const consoleTransport = new winston.transports.Console({
   level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
@@ -46,10 +37,7 @@ const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'info',
   levels,
   format,
-  transports: [
-    fileRotateTransport,
-    consoleTransport
-  ],
+  transports: [consoleTransport],
   exitOnError: false,
 });
 
@@ -69,7 +57,7 @@ const safeStringify = (obj, replacer = null, spaces = 2) => {
       if (value instanceof Error) {
         return {
           message: value.message,
-          stack: process.env.NODE_ENV === 'production' ? undefined : value.stack
+          stack: process.env.NODE_ENV === 'production' ? undefined : value.stack,
         };
       }
       
@@ -91,16 +79,13 @@ export const requestLogger = (req, res, next) => {
   const requestId = Math.random().toString(36).substring(2, 15);
   req.requestId = requestId;
   
-  // Log only essential request info
   if (process.env.NODE_ENV !== 'production') {
     logger.info(`Request [${requestId}]: ${req.method} ${req.originalUrl}`);
   }
   
-  // Log when request completes
   res.on('finish', () => {
     const duration = Date.now() - start;
     
-    // Log minimal info in production, more in development
     if (res.statusCode >= 400) {
       const logLevel = res.statusCode >= 500 ? 'error' : 'warn';
       logger[logLevel](`Response [${requestId}]: ${res.statusCode} ${req.method} ${req.originalUrl} - ${duration}ms`);

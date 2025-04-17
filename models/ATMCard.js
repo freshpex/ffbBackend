@@ -45,6 +45,21 @@ const atmCardSchema = new mongoose.Schema({
   cvv: {
     type: String
   },
+  cardHistory: [{
+    cardNumber: String,
+    cvv: String,
+    expiryDate: String,
+    createdAt: {
+      type: Date,
+      default: Date.now
+    },
+    reason: String
+  }],
+  iterationCount: {
+    type: Number,
+    default: 0
+  },
+  lastIteratedAt: Date,
   cardDesign: {
     primaryColor: {
       type: String,
