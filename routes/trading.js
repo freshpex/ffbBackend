@@ -1,265 +1,134 @@
 import express from 'express';
-import Order from '../models/Order.js';
-import User from '../models/User.js';
-import Transaction from '../models/Transaction.js';
+import { verifyToken } from '../middleware/auth.js';
+import OrderController from '../controllers/OrderController.js';
+import { tradingLimiter as rateLimiter } from '../middleware/rateLimiter.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
-import mongoose from 'mongoose';
-import logger from '../middleware/logger.js';
-import axios from 'axios';
 
 const router = express.Router();
 
-// Get user's orders
-router.get('/orders', asyncHandler(async (req, res) => {
-  const { status, symbol, page = 1, limit = 10 } = req.query;
-  
-  const query = { user: req.user._id };
-  
-  if (status) {
-    query.status = status;
-  }
-  
-  if (symbol) {
-    query.symbol = symbol;
-  }
-  
-  const orders = await Order.find(query)
-    .sort({ createdAt: -1 })
-    .skip((parseInt(page) - 1) * parseInt(limit))
-    .limit(parseInt(limit));
-  
-  const total = await Order.countDocuments(query);
-  
-  res.status(200).json({
-    orders,
-    page: parseInt(page),
-    totalPages: Math.ceil(total / parseInt(limit)),
-    total
-  });
-}));
+// Apply authentication middleware to all trading routes
+router.use(verifyToken);
 
-// Place order
-router.post('/order', async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-  
+// Get market data for trading
+router.get('/market-data', async (req, res, next) => {
   try {
-    const { symbol, side, type, quantity, price } = req.body;
+    // This is a placeholder - in a real app you would call your market data service
+    const { symbol } = req.query;
     
-    if (!symbol || !side || !type || !quantity) {
-      return res.status(400).json({ message: 'Missing required fields' });
-    }
+    // Sample data
+    const data = {
+      "BTC/USDT": {
+        symbol: 'BTC/USDT',
+        lastPrice: 60421.50,
+        priceChange: 2.35,
+        high24h: 61000.00,
+        low24h: 59800.00,
+        volume24h: 2145.38,
+      },
+      "ETH/USDT": {
+        symbol: 'ETH/USDT',
+        lastPrice: 3592.75,
+        priceChange: 1.27,
+        high24h: 3650.00,
+        low24h: 3550.20,
+        volume24h: 15423.21,
+      },
+      // Add more sample data as needed
+    };
     
-    if (type === 'limit' && !price) {
-      return res.status(400).json({ message: 'Price is required for limit orders' });
-    }
+    const response = symbol ? { [symbol]: data[symbol] } : data;
     
-    // Get current price if market order
-    let orderPrice = price;
-    
-    if (type === 'market') {
-      try {
-        const response = await axios.get(`${process.env.BINANCE_API_URL}/ticker/price`, {
-          params: { symbol }
-        });
-        orderPrice = parseFloat(response.data.price);
-      } catch (error) {
-        logger.error(`Error fetching price for ${symbol}:`, error);
-        // For demo purposes, we'll use a mock price
-        orderPrice = 5000; // Example price
-      }
-    }
-    
-    // Calculate total value
-    const totalValue = quantity * orderPrice;
-    
-    // If buying, check if user has enough balance
-    if (side === 'buy') {
-      const user = await User.findById(req.user._id);
-      
-      if (user.balance < totalValue) {
-        return res.status(400).json({ message: 'Insufficient balance' });
-      }
-      
-      // Deduct from balance
-      user.balance -= totalValue;
-      await user.save({ session });
-      
-      // Create transaction
-      const transaction = new Transaction({
-        user: user._id,
-        type: 'investment',
-        amount: -totalValue,
-        currency: 'USD',
-        status: 'completed',
-        method: 'internal',
-        description: `Buy order for ${quantity} ${symbol}`,
-        processedAt: new Date()
-      });
-      
-      await transaction.save({ session });
-    }
-    
-    // Create order
-    const order = new Order({
-      user: req.user._id,
-      symbol,
-      side,
-      type,
-      quantity,
-      price: orderPrice,
-      status: 'new',
-      clientOrderId: `order_${Date.now()}_${Math.floor(Math.random() * 1000)}`
-    });
-    
-    await order.save({ session });
-    
-    // If market order, execute immediately (simulate)
-    if (type === 'market') {
-      order.status = 'filled';
-      order.filledQuantity = quantity;
-      order.averagePrice = orderPrice;
-      order.totalFilled = quantity * orderPrice;
-      
-      await order.save({ session });
-      
-      // If selling, add to balance
-      if (side === 'sell') {
-        const user = await User.findById(req.user._id);
-        user.balance += totalValue;
-        await user.save({ session });
-        
-        // Create transaction
-        const transaction = new Transaction({
-          user: user._id,
-          type: 'investment',
-          amount: totalValue,
-          currency: 'USD',
-          status: 'completed',
-          method: 'internal',
-          description: `Sell order for ${quantity} ${symbol}`,
-          processedAt: new Date()
-        });
-        
-        await transaction.save({ session });
-      }
-    }
-    
-    await session.commitTransaction();
-    
-    res.status(201).json({
-      message: 'Order placed successfully',
-      order
+    res.status(200).json({
+      success: true,
+      data: response
     });
   } catch (error) {
-    await session.abortTransaction();
-    logger.error('Error placing order:', error);
-    res.status(500).json({ message: 'Server error' });
-  } finally {
-    session.endSession();
+    next(error);
   }
 });
 
-// Cancel order
-router.delete('/order/:id', asyncHandler(async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-  
+// Get available trading pairs
+router.get('/pairs', async (req, res, next) => {
   try {
-    const order = await Order.findOne({
-      _id: req.params.id,
-      user: req.user._id
-    });
-    
-    if (!order) {
-      return res.status(404).json({ message: 'Order not found' });
-    }
-    
-    if (order.status === 'filled' || order.status === 'canceled') {
-      return res.status(400).json({ message: `Cannot cancel order with status: ${order.status}` });
-    }
-    
-    order.status = 'canceled';
-    await order.save({ session });
-    
-    // If buying, refund the balance
-    if (order.side === 'buy' && order.type === 'limit') {
-      const totalValue = order.quantity * order.price;
-      
-      const user = await User.findById(req.user._id);
-      user.balance += totalValue;
-      await user.save({ session });
-      
-      // Create refund transaction
-      const transaction = new Transaction({
-        user: user._id,
-        type: 'investment',
-        amount: totalValue,
-        currency: 'USD',
-        status: 'completed',
-        method: 'internal',
-        description: `Refund for canceled ${order.symbol} order`,
-        processedAt: new Date()
-      });
-      
-      await transaction.save({ session });
-    }
-    
-    await session.commitTransaction();
+    // This would come from your market data service in a real app
+    const pairs = [
+      { symbol: 'BTC/USDT', name: 'Bitcoin', type: 'crypto', lastPrice: 60421.50, priceChange: 2.35 },
+      { symbol: 'ETH/USDT', name: 'Ethereum', type: 'crypto', lastPrice: 3592.75, priceChange: 1.27 },
+      { symbol: 'XRP/USDT', name: 'Ripple', type: 'crypto', lastPrice: 0.5923, priceChange: -0.42 },
+      { symbol: 'SOL/USDT', name: 'Solana', type: 'crypto', lastPrice: 143.82, priceChange: 5.67 },
+      { symbol: 'ADA/USDT', name: 'Cardano', lastPrice: 0.451, priceChange: 0.23 },
+      { symbol: 'DOGE/USDT', name: 'Dogecoin', type: 'crypto', lastPrice: 0.1287, priceChange: -1.32 },
+      { symbol: 'AAPL/USD', name: 'Apple Inc', type: 'stock', lastPrice: 175.92, priceChange: 0.87 },
+      { symbol: 'MSFT/USD', name: 'Microsoft', type: 'stock', lastPrice: 415.50, priceChange: 1.43 },
+      { symbol: 'GOOGL/USD', name: 'Alphabet', type: 'stock', lastPrice: 176.42, priceChange: 2.10 },
+      { symbol: 'AMZN/USD', name: 'Amazon', type: 'stock', lastPrice: 182.15, priceChange: -0.34 },
+      { symbol: 'TSLA/USD', name: 'Tesla', type: 'stock', lastPrice: 245.23, priceChange: 3.78 },
+    ];
     
     res.status(200).json({
-      message: 'Order canceled successfully',
-      order
+      success: true,
+      data: pairs
     });
   } catch (error) {
-    await session.abortTransaction();
-    logger.error('Error canceling order:', error);
-    res.status(500).json({ message: 'Server error' });
-  } finally {
-    session.endSession();
+    next(error);
   }
-}));
+});
 
-// Get user's trading portfolio
-router.get('/portfolio', asyncHandler(async (req, res) => {
-  // This would normally fetch from a Portfolio collection
-  // For demo purposes, we'll create a mock portfolio
-  
-  const mockPortfolio = [
-    {
-      symbol: 'BTC',
-      quantity: 0.5,
-      averagePrice: 35000,
-      currentPrice: 38000,
-      value: 19000,
-      unrealizedPnL: 1500,
-      unrealizedPnLPercent: 8.57
-    },
-    {
-      symbol: 'ETH',
-      quantity: 5,
-      averagePrice: 2200,
-      currentPrice: 2500,
-      value: 12500,
-      unrealizedPnL: 1500,
-      unrealizedPnLPercent: 13.64
-    },
-    {
-      symbol: 'ADA',
-      quantity: 5000,
-      averagePrice: 0.5,
-      currentPrice: 0.55,
-      value: 2750,
-      unrealizedPnL: 250,
-      unrealizedPnLPercent: 10
+// Get orderbook for a trading pair
+router.get('/orderbook', async (req, res, next) => {
+  try {
+    const { symbol } = req.query;
+    
+    if (!symbol) {
+      return res.status(400).json({
+        success: false,
+        message: 'Symbol is required'
+      });
     }
-  ];
-  
-  res.status(200).json({
-    portfolio: mockPortfolio,
-    totalValue: mockPortfolio.reduce((sum, asset) => sum + asset.value, 0),
-    totalUnrealizedPnL: mockPortfolio.reduce((sum, asset) => sum + asset.unrealizedPnL, 0)
-  });
-}));
+    
+    // This would come from your market data service in a real app
+    // Here's sample data
+    const orderbook = {
+      symbol,
+      bids: [
+        [60410.50, 0.25],
+        [60405.20, 0.5],
+        [60400.00, 1.2],
+        [60390.75, 2.3],
+        [60380.00, 3.1],
+      ],
+      asks: [
+        [60425.00, 0.15],
+        [60430.50, 0.35],
+        [60440.00, 1.0],
+        [60450.25, 1.8],
+        [60460.00, 2.5],
+      ],
+      timestamp: Date.now()
+    };
+    
+    res.status(200).json({
+      success: true,
+      data: orderbook
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// User orders CRUD endpoints
+router.get('/orders', OrderController.getUserOrders);
+router.get('/orders/:id', OrderController.getOrder);
+router.post('/orders',  OrderController.placeOrder);
+router.delete('/orders/:id', OrderController.cancelOrder);
+
+// Trading history
+router.get('/history', OrderController.getTradingHistory);
+
+// Portfolio
+router.get('/portfolio', OrderController.getPortfolio);
+
+// Get order statistics and performance metrics
+router.get('/stats', asyncHandler(OrderController.getOrdersStats));
 
 export default router;

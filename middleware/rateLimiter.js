@@ -46,8 +46,8 @@ const getStore = () => {
 
 // Standard API rate limiter
 export const apiLimiter = rateLimit({
-  windowMs: Number(process.env.RATE_LIMIT_WINDOW) * 60 * 10000 || 15 * 60 * 10000, // 15 minutes by default
-  max: Number(process.env.RATE_LIMIT_MAX) || 100, // 100 requests per window by default
+  windowMs: Number(process.env.RATE_LIMIT_WINDOW) * 60 * 10000 || 15 * 60 * 10000,
+  max: Number(process.env.RATE_LIMIT_MAX) || 100, 
   standardHeaders: true,
   legacyHeaders: false,
   store: getStore(),
@@ -59,7 +59,6 @@ export const apiLimiter = rateLimit({
     }
   },
   skip: (req) => {
-    // Skip rate limiting for trusted IPs if configured
     if (process.env.TRUSTED_IPS) {
       const trustedIps = process.env.TRUSTED_IPS.split(',');
       const clientIp = req.ip || req.headers['x-forwarded-for'];
@@ -68,22 +67,22 @@ export const apiLimiter = rateLimit({
     return false;
   },
   keyGenerator: (req) => {
-    // Use user ID if authenticated, otherwise IP
     return req.user ? `user:${req.user.userId}` : req.ip;
   },
-  onLimitReached: (req, res, options) => {
+  handler: (req, res, next, options) => {
     logger.warn(`Rate limit exceeded for ${req.ip}`, {
       path: req.path,
       method: req.method,
       user: req.user?.userId
     });
+    res.status(options.statusCode).json(options.message);
   }
 });
 
 // Stricter auth endpoint limiter
 export const authLimiter = rateLimit({
   windowMs: 60 * 60 * 100000, // 1 hour
-  max: 20, // 20 attempts per hour
+  max: 20,
   standardHeaders: true,
   legacyHeaders: false,
   store: getStore(),
@@ -95,17 +94,17 @@ export const authLimiter = rateLimit({
     }
   },
   keyGenerator: (req) => {
-    // Use email if provided, otherwise IP
     const email = req.body.email?.toLowerCase();
     return email ? `auth:${email}` : `ip:${req.ip}`;
   },
-  onLimitReached: (req, res, options) => {
+  handler: (req, res, next, options) => {
     const email = req.body.email?.toLowerCase();
     logger.warn(`Auth rate limit exceeded`, {
       ip: req.ip,
       email: email,
       path: req.path
     });
+    res.status(options.statusCode).json(options.message);
   }
 });
 

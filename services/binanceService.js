@@ -1,252 +1,293 @@
 import axios from 'axios';
 import crypto from 'crypto';
 import logger from '../middleware/logger.js';
+import config from '../config/config.js';
 
-class BinanceService {
-  constructor() {
-    this.baseUrl = 'https://api.binance.com';
-    this.testUrl = 'https://testnet.binance.vision';
-    this.wsUrl = 'wss://stream.binance.com:9443/ws';
-    this.testWsUrl = 'wss://testnet.binance.vision/ws';
-    
-    // Use test environment in development
-    this.useTestnet = process.env.NODE_ENV !== 'production';
-    
-    // Create axios instance with defaults
-    this.httpClient = axios.create({
-      baseURL: this.useTestnet ? this.testUrl : this.baseUrl,
-      timeout: 30000,
-      headers: {
-        'Content-Type': 'application/json',
-        'X-MBX-APIKEY': '' // This will be set per-request
-      }
-    });
-    
-    // Setup response interceptor for error handling
-    this.httpClient.interceptors.response.use(
-      response => response,
-      error => this.handleApiError(error)
-    );
-  }
+// Initialize with config values
+const API_KEY = process.env.BINANCE_API_KEY;
+const API_SECRET = process.env.BINANCE_API_SECRET;
+const BASE_URL = process.env.BINANCE_API_URL || 'https://api.binance.com/api/v3';
+
+const generateSignature = (queryParams) => {
+  const queryString = Object.keys(queryParams)
+    .map(key => `${key}=${queryParams[key]}`)
+    .join('&');
   
-  // Handle API errors in a consistent way
-  handleApiError(error) {
-    if (error.response) {
-      // The request was made and the server responded with an error status
-      logger.error('Binance API error:', {
-        status: error.response.status,
-        data: error.response.data,
-        endpoint: error.config.url
-      });
-      
-      const errorObj = new Error(`Binance API error: ${error.response.status}`);
-      errorObj.code = error.response.status;
-      errorObj.data = error.response.data;
-      errorObj.endpoint = error.config.url;
-      return Promise.reject(errorObj);
-    } else if (error.request) {
-      // The request was made but no response was received
-      logger.error('Binance API no response:', {
-        request: error.request._currentUrl,
-        method: error.config.method
-      });
-      return Promise.reject(new Error('No response from Binance API'));
-    } else {
-      // Something happened in setting up the request
-      logger.error('Binance API request error:', error.message);
-      return Promise.reject(new Error(`Error setting up Binance request: ${error.message}`));
-    }
-  }
-  
-  // Generate signature for authenticated requests
-  generateSignature(queryString, apiSecret) {
-    return crypto
-      .createHmac('sha256', apiSecret)
-      .update(queryString)
-      .digest('hex');
-  }
-  
-  // Helper to add timestamp and signature to query params
-  signRequest(params, apiSecret) {
+  return crypto
+    .createHmac('sha256', API_SECRET)
+    .update(queryString)
+    .digest('hex');
+};
+
+const makeAuthenticatedRequest = async (endpoint, method = 'GET', params = {}) => {
+  try {
     const timestamp = Date.now();
-    let queryString = `timestamp=${timestamp}`;
+    const queryParams = {
+      ...params,
+      timestamp,
+      recvWindow: 60000, // Valid for 60 seconds
+    };
     
-    // Add other params to query string
-    for (const key in params) {
-      if (params[key] !== undefined) {
-        queryString += `&${key}=${params[key]}`;
-      }
+    // Generate signature
+    const signature = generateSignature(queryParams);
+    queryParams.signature = signature;
+    
+    // Build query string
+    const queryString = Object.keys(queryParams)
+      .map(key => `${key}=${encodeURIComponent(queryParams[key])}`)
+      .join('&');
+    
+    // Make request
+    const url = `${BASE_URL}${endpoint}${method === 'GET' ? '?' + queryString : ''}`;
+    
+    const headers = {
+      'X-MBX-APIKEY': API_KEY,
+      'Content-Type': 'application/x-www-form-urlencoded'
+    };
+    
+    let response;
+    if (method === 'GET') {
+      response = await axios.get(url, { headers });
+    } else if (method === 'POST') {
+      response = await axios.post(url, queryString, { headers });
+    } else if (method === 'DELETE') {
+      response = await axios.delete(url, {
+        headers,
+        params: queryParams
+      });
     }
     
-    const signature = this.generateSignature(queryString, apiSecret);
-    return `${queryString}&signature=${signature}`;
+    return response.data;
+  } catch (error) {
+    logger.error(`Error making authenticated request to ${endpoint}:`, error.response?.data || error.message);
+    throw new Error(`Binance API Error: ${error.response?.data?.msg || error.message}`);
   }
-  
-  // Public API methods (no authentication needed)
-  async getExchangeInfo() {
-    try {
-      const response = await this.httpClient.get('/api/v3/exchangeInfo');
-      return response.data;
-    } catch (error) {
-      logger.error('Failed to get exchange info:', error);
-      throw error;
-    }
-  }
-  
-  async getMarketPrice(symbol) {
-    try {
-      const response = await this.httpClient.get('/api/v3/ticker/price', {
-        params: { symbol }
-      });
-      return response.data;
-    } catch (error) {
-      logger.error(`Failed to get market price for ${symbol}:`, error);
-      throw error;
-    }
-  }
-  
-  async getKlines(symbol, interval, limit = 500) {
-    try {
-      const response = await this.httpClient.get('/api/v3/klines', {
-        params: { symbol, interval, limit }
-      });
-      return response.data;
-    } catch (error) {
-      logger.error(`Failed to get klines for ${symbol}:`, error);
-      throw error;
-    }
-  }
-  
-  // Private API methods (authentication needed)
-  async getAccountInfo(apiKey, apiSecret) {
-    try {
-      const queryString = this.signRequest({}, apiSecret);
-      
-      const response = await this.httpClient.get(`/api/v3/account?${queryString}`, {
-        headers: {
-          'X-MBX-APIKEY': apiKey
-        }
-      });
-      
-      return response.data;
-    } catch (error) {
-      logger.error('Failed to get account info:', error);
-      throw error;
-    }
-  }
-  
-  async createOrder(apiKey, apiSecret, orderData) {
-    try {
-      // Required parameters for order placement
-      const { symbol, side, type, quantity } = orderData;
-      
-      if (!symbol || !side || !type || !quantity) {
-        throw new Error('Missing required order parameters');
-      }
-      
-      // Prepare order parameters
-      const params = {
-        symbol,
-        side,
-        type,
-        quantity,
-        timeInForce: orderData.timeInForce || 'GTC',
-        price: orderData.price,
-        newClientOrderId: orderData.newClientOrderId,
-        newOrderRespType: 'FULL'
-      };
-      
-      // Remove undefined values
-      Object.keys(params).forEach(key => 
-        params[key] === undefined && delete params[key]
-      );
-      
-      // Sign the request
-      const queryString = this.signRequest(params, apiSecret);
-      
-      // Make the API call
-      const response = await this.httpClient.post(`/api/v3/order?${queryString}`, null, {
-        headers: {
-          'X-MBX-APIKEY': apiKey
-        }
-      });
-      
-      return response.data;
-    } catch (error) {
-      logger.error('Failed to create order:', error);
-      throw error;
-    }
-  }
-  
-  async cancelOrder(apiKey, apiSecret, symbol, orderId) {
-    try {
-      const params = { symbol, orderId };
-      const queryString = this.signRequest(params, apiSecret);
-      
-      const response = await this.httpClient.delete(`/api/v3/order?${queryString}`, {
-        headers: {
-          'X-MBX-APIKEY': apiKey
-        }
-      });
-      
-      return response.data;
-    } catch (error) {
-      logger.error(`Failed to cancel order ${orderId}:`, error);
-      throw error;
-    }
-  }
-  
-  async getOpenOrders(apiKey, apiSecret, symbol) {
-    try {
-      const params = symbol ? { symbol } : {};
-      const queryString = this.signRequest(params, apiSecret);
-      
-      const response = await this.httpClient.get(`/api/v3/openOrders?${queryString}`, {
-        headers: {
-          'X-MBX-APIKEY': apiKey
-        }
-      });
-      
-      return response.data;
-    } catch (error) {
-      logger.error('Failed to get open orders:', error);
-      throw error;
-    }
-  }
-  
-  // Formatted price ticker with additional data for frontend consumption
-  async getFormattedTickers(symbols = []) {
-    try {
-      let response;
-      
-      if (symbols.length === 0) {
-        // Get all tickers
-        response = await this.httpClient.get('/api/v3/ticker/24hr');
-      } else {
-        // Get specific symbols
-        const symbolsParam = symbols.join('","');
-        response = await this.httpClient.get('/api/v3/ticker/24hr', {
-          params: { symbols: `["${symbolsParam}"]` }
-        });
-      }
-      
-      // Format for frontend consumption
-      return response.data.map(ticker => ({
-        symbol: ticker.symbol,
-        lastPrice: parseFloat(ticker.lastPrice),
-        priceChange: parseFloat(ticker.priceChange),
-        priceChangePercent: parseFloat(ticker.priceChangePercent),
-        highPrice: parseFloat(ticker.highPrice),
-        lowPrice: parseFloat(ticker.lowPrice),
-        volume: parseFloat(ticker.volume),
-        quoteVolume: parseFloat(ticker.quoteVolume),
-        updatedAt: new Date().toISOString()
-      }));
-    } catch (error) {
-      logger.error('Failed to get formatted tickers:', error);
-      throw error;
-    }
-  }
-}
+};
 
-export default new BinanceService();
+const makePublicRequest = async (endpoint, params = {}) => {
+  try {
+    const queryString = Object.keys(params)
+      .map(key => `${key}=${encodeURIComponent(params[key])}`)
+      .join('&');
+    
+    const url = `${BASE_URL}${endpoint}${queryString ? '?' + queryString : ''}`;
+    const response = await axios.get(url);
+    return response.data;
+  } catch (error) {
+    logger.error(`Error making public request to ${endpoint}:`, error.response?.data || error.message);
+    throw new Error(`Binance API Error: ${error.response?.data?.msg || error.message}`);
+  }
+};
+
+/**
+ * Binance service for market data and trading
+ */
+const binanceService = {
+  /**
+   * Get 24-hour ticker for a symbol
+   * @param {string} symbol - The trading symbol (e.g., BTCUSDT)
+   * @returns {Promise} - The ticker data
+   */
+  get24hrTicker: async (symbol) => {
+    const endpoint = '/ticker/24hr';
+    const params = symbol ? { symbol } : {};
+    return makePublicRequest(endpoint, params);
+  },
+  
+  /**
+   * Get ticker price for a symbol
+   * @param {string} symbol - The trading symbol (e.g., BTCUSDT)
+   * @returns {Promise} - The current price
+   */
+  getTickerPrice: async (symbol) => {
+    const endpoint = '/ticker/price';
+    const params = symbol ? { symbol } : {};
+    return makePublicRequest(endpoint, params);
+  },
+  
+  /**
+   * Get klines (candlestick) data
+   * @param {Object} options - Options for klines
+   * @param {string} options.symbol - Symbol (e.g., BTCUSDT)
+   * @param {string} options.interval - Candlestick interval (e.g., 1h)
+   * @param {number} options.limit - Number of candles to return
+   * @returns {Promise} - Klines data
+   */
+  getKlines: async (options) => {
+    const endpoint = '/klines';
+    const { symbol, interval = '1h', limit = 500, startTime, endTime } = options;
+    
+    const params = { symbol, interval, limit };
+    if (startTime) params.startTime = startTime;
+    if (endTime) params.endTime = endTime;
+    
+    return makePublicRequest(endpoint, params);
+  },
+  
+  /**
+   * Get exchange information
+   * @returns {Promise} - Exchange info
+   */
+  getExchangeInfo: async () => {
+    const endpoint = '/exchangeInfo';
+    return makePublicRequest(endpoint);
+  },
+  
+  /**
+   * Get order book for a symbol
+   * @param {string} symbol - The trading symbol
+   * @param {number} limit - Depth of order book (default 100)
+   * @returns {Promise} - Order book data
+   */
+  getDepth: async (symbol, limit = 100) => {
+    const endpoint = '/depth';
+    const params = { symbol, limit };
+    return makePublicRequest(endpoint, params);
+  },
+  
+  /**
+   * Get recent trades for a symbol
+   * @param {string} symbol - The trading symbol
+   * @param {number} limit - The number of trades to return
+   * @returns {Promise} - Recent trades data
+   */
+  getTrades: async (symbol, limit = 50) => {
+    const endpoint = '/trades';
+    const params = { symbol, limit };
+    return makePublicRequest(endpoint, params);
+  },
+  
+  /**
+   * Get account information and balances
+   * @returns {Promise} - Account information
+   */
+  getAccountInfo: async () => {
+    const endpoint = '/account';
+    return makeAuthenticatedRequest(endpoint, 'GET');
+  },
+  
+  /**
+   * Place a new order
+   * @param {Object} orderParams - Order parameters
+   * @param {string} orderParams.symbol - Symbol to trade (e.g., BTCUSDT)
+   * @param {string} orderParams.side - Order side: BUY or SELL
+   * @param {string} orderParams.type - Order type: LIMIT, MARKET, STOP_LOSS, etc.
+   * @param {string} orderParams.timeInForce - Time in force: GTC, IOC, FOK
+   * @param {number} orderParams.quantity - Order quantity
+   * @param {number} orderParams.price - Order price (for limit orders)
+   * @param {string} orderParams.newClientOrderId - Custom client order ID
+   * @returns {Promise} - Order response
+   */
+  placeOrder: async (orderParams) => {
+    const endpoint = '/order';
+    
+    // Validate required parameters based on order type
+    if (!orderParams.symbol || !orderParams.side || !orderParams.type) {
+      throw new Error('Missing required order parameters: symbol, side, or type');
+    }
+    
+    // Convert side to uppercase
+    orderParams.side = orderParams.side.toUpperCase();
+    
+    // Convert type to uppercase
+    orderParams.type = orderParams.type.toUpperCase();
+    
+    // Set default timeInForce for LIMIT orders
+    if (orderParams.type === 'LIMIT' && !orderParams.timeInForce) {
+      orderParams.timeInForce = 'GTC'; // Good Till Cancelled
+    }
+    
+    // For MARKET orders, we don't need price
+    if (orderParams.type === 'MARKET' && orderParams.price) {
+      delete orderParams.price;
+    }
+    
+    // Use the provided newClientOrderId or generate one
+    if (!orderParams.newClientOrderId) {
+      orderParams.newClientOrderId = `ffb_${Date.now()}`;
+    }
+    
+    return makeAuthenticatedRequest(endpoint, 'POST', orderParams);
+  },
+  
+  /**
+   * Cancel an order
+   * @param {string} symbol - Symbol (e.g., BTCUSDT)
+   * @param {string|number} orderId - Order ID to cancel
+   * @returns {Promise} - Cancel response
+   */
+  cancelOrder: async (symbol, orderId) => {
+    const endpoint = '/order';
+    const params = { symbol, orderId };
+    return makeAuthenticatedRequest(endpoint, 'DELETE', params);
+  },
+  
+  /**
+   * Cancel an order by client order ID
+   * @param {string} symbol - Symbol (e.g., BTCUSDT)
+   * @param {string} origClientOrderId - Original client order ID
+   * @returns {Promise} - Cancel response
+   */
+  cancelOrderByClientId: async (symbol, origClientOrderId) => {
+    const endpoint = '/order';
+    const params = { symbol, origClientOrderId };
+    return makeAuthenticatedRequest(endpoint, 'DELETE', params);
+  },
+  
+  /**
+   * Get all open orders
+   * @param {string} symbol - Optional symbol to filter by
+   * @returns {Promise} - Open orders
+   */
+  getOpenOrders: async (symbol) => {
+    const endpoint = '/openOrders';
+    const params = symbol ? { symbol } : {};
+    return makeAuthenticatedRequest(endpoint, 'GET', params);
+  },
+  
+  /**
+   * Get order status
+   * @param {string} symbol - Symbol (e.g., BTCUSDT)
+   * @param {string|number} orderId - Order ID
+   * @returns {Promise} - Order info
+   */
+  getOrder: async (symbol, orderId) => {
+    const endpoint = '/order';
+    const params = { symbol, orderId };
+    return makeAuthenticatedRequest(endpoint, 'GET', params);
+  },
+  
+  /**
+   * Get order status by client order ID
+   * @param {string} symbol - Symbol (e.g., BTCUSDT)
+   * @param {string} origClientOrderId - Client order ID
+   * @returns {Promise} - Order info
+   */
+  getOrderByClientId: async (symbol, origClientOrderId) => {
+    const endpoint = '/order';
+    const params = { symbol, origClientOrderId };
+    return makeAuthenticatedRequest(endpoint, 'GET', params);
+  },
+  
+  /**
+   * Get all account orders for a symbol
+   * @param {string} symbol - Symbol (e.g., BTCUSDT)
+   * @param {number} limit - Max number of orders to return
+   * @returns {Promise} - Account orders
+   */
+  getAllOrders: async (symbol, limit = 500) => {
+    const endpoint = '/allOrders';
+    const params = { symbol, limit };
+    return makeAuthenticatedRequest(endpoint, 'GET', params);
+  },
+  
+  /**
+   * Check if the Binance service is properly configured
+   * @returns {boolean} - True if API keys are set
+   */
+  isConfigured: () => {
+    return !!API_KEY && !!API_SECRET;
+  }
+};
+
+export default binanceService;

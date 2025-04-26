@@ -18,7 +18,6 @@ const CACHE_ROUTES = {
 
 // Setup the Redis cache middleware
 export const setupRedisCache = (app, redisClient) => {
-  // Skip caching if Redis is not available
   if (!redisClient || !redisClient.isReady) {
     logger.warn('Redis client not available, caching disabled');
     return;

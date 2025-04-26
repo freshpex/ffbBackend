@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 
-const orderSchema = new mongoose.Schema({
+const OrderSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -8,16 +8,17 @@ const orderSchema = new mongoose.Schema({
   },
   symbol: {
     type: String,
+    required: true,
+    index: true
+  },
+  side: {
+    type: String,
+    enum: ['buy', 'sell'],
     required: true
   },
   type: {
     type: String,
     enum: ['market', 'limit', 'stop', 'stop_limit'],
-    default: 'market'
-  },
-  side: {
-    type: String,
-    enum: ['buy', 'sell'],
     required: true
   },
   quantity: {
@@ -25,45 +26,62 @@ const orderSchema = new mongoose.Schema({
     required: true
   },
   price: {
-    type: Number
+    type: Number,
+    required: function() {
+      // Price is required for all order types except market orders
+      return this.type !== 'market';
+    }
   },
   stopPrice: {
-    type: Number
+    type: Number,
+    required: function() {
+      return this.type === 'stop' || this.type === 'stop_limit';
+    }
   },
   status: {
     type: String,
     enum: ['new', 'partially_filled', 'filled', 'canceled', 'rejected', 'expired'],
     default: 'new'
   },
-  filledQuantity: {
+  executedQuantity: {
     type: Number,
     default: 0
   },
-  averagePrice: {
+  executionPrice: {
     type: Number
   },
-  totalFilled: {
+  fee: {
     type: Number,
     default: 0
   },
-  commission: {
+  total: {
     type: Number,
-    default: 0
+    default: function() {
+      return this.price ? this.price * this.quantity : 0;
+    }
   },
   clientOrderId: {
-    type: String
-  },
-  exchange: {
     type: String,
-    default: 'binance'
+    index: true
   },
-  metadata: {
-    type: Object
+  processedAt: {
+    type: Date
+  },
+  canceledAt: {
+    type: Date
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
   }
 }, {
   timestamps: true
 });
 
-const Order = mongoose.model('Order', orderSchema);
+// Indexes for query optimization
+OrderSchema.index({ user: 1, createdAt: -1 });
+OrderSchema.index({ user: 1, symbol: 1, status: 1 });
+OrderSchema.index({ status: 1, type: 1 });
+OrderSchema.index({ processedAt: -1 });
 
-export default Order;
+export default mongoose.model('Order', OrderSchema);

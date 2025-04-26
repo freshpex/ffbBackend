@@ -12,6 +12,10 @@ const MONGO_URI = process.env.MONGODB_URI;
 // Create HTTP server
 const server = http.createServer(app);
 
+// Track server initialization state
+let isServerInitializing = false;
+let isServerRunning = false;
+
 // Connect to MongoDB with retry logic
 const connectDB = async (retryCount = 0) => {
   const MAX_RETRIES = 3;
@@ -44,6 +48,14 @@ const connectDB = async (retryCount = 0) => {
 // Initialize server
 const initServer = async () => {
   try {
+    // Prevent concurrent initialization attempts
+    if (isServerInitializing || isServerRunning) {
+      logger.warn('Server initialization already in progress or server is already running');
+      return;
+    }
+    
+    isServerInitializing = true;
+    
     // Connect to database
     await connectDB();
     
@@ -55,10 +67,26 @@ const initServer = async () => {
     
     // Start the server
     server.listen(PORT, () => {
+      isServerRunning = true;
+      isServerInitializing = false;
       logger.info(`Server running in ${ENV} mode on port ${PORT}`);
     });
+
+    // Handle server errors
+    server.on('error', (error) => {
+      if (error.code === 'EADDRINUSE') {
+        logger.error(`Port ${PORT} is already in use. Server could not start.`);
+      } else {
+        logger.error(`Server error: ${error.message}`);
+      }
+      isServerInitializing = false;
+      process.exit(1);
+    });
+    
   } catch (error) {
     logger.error(`Server initialization error: ${error.message}`);
+    isServerInitializing = false;
+    isServerRunning = false;
     process.exit(1);
   }
 };
@@ -86,13 +114,19 @@ process.on('SIGTERM', () => {
   // Stop the price alert service
   priceAlertService.stop();
   
-  server.close(() => {
-    logger.info('Server closed');
+  if (isServerRunning) {
+    server.close(() => {
+      logger.info('Server closed');
+      process.exit(0);
+    });
+  } else {
     process.exit(0);
-  });
+  }
 });
 
-// Initialize server
-initServer();
+// Initialize server only if this is the main module (not imported by another module)
+if (process.env.NODE_ENV !== 'test') {
+  initServer();
+}
 
-export default server;
+// Do not export server to prevent multiple initializations

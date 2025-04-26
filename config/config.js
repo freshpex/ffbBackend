@@ -7,7 +7,6 @@ dotenv.config();
 
 // Configuration with defaults for various environments
 const config = {
-  // Server configuration
   server: {
     port: process.env.PORT || 5000,
     env: process.env.NODE_ENV || 'development',
@@ -37,6 +36,23 @@ const config = {
     enabled: process.env.USE_REDIS === 'true',
     url: process.env.REDIS_URL || 'redis://localhost:6379',
     ttl: parseInt(process.env.REDIS_TTL) || 60 * 60, // Default to 1 hour
+  },
+
+  // Market Data API settings
+  marketData: {
+    alphaVantage: {
+      apiKey: process.env.ALPHA_VANTAGE_API_KEY || '',
+      baseUrl: 'https://www.alphavantage.co/query',
+    },
+    cryptoCompare: {
+      apiKey: process.env.CRYPTOCOMPARE_API_KEY || '',
+      baseUrl: 'https://min-api.cryptocompare.com/data',
+    },
+    finnhub: {
+      apiKey: process.env.FINNHUB_API_KEY || '',
+      baseUrl: 'https://finnhub.io/api/v1',
+    },
+    useMockData: process.env.USE_MOCK_DATA === 'true',
   },
 
   // Binance API settings

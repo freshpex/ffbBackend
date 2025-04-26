@@ -8,6 +8,7 @@ class PriceAlertService {
     this.isRunning = false;
     this.checkInterval = null;
     this.marketData = {};
+    this.initialized = false;
   }
 
   /**
@@ -17,19 +18,26 @@ class PriceAlertService {
   start(interval = 60000) { // Default check interval: 1 minute
     if (this.isRunning) {
       logger.warn('Price alert service is already running');
-      return;
+      return false;
     }
 
     logger.info(`Starting price alert checking service with interval: ${interval}ms`);
     this.isRunning = true;
+    this.initialized = true;
 
     // Run an immediate check
-    this.checkAlerts();
+    this.checkAlerts().catch(err => {
+      logger.error('Error in initial price alert check:', err);
+    });
 
     // Set interval for future checks
     this.checkInterval = setInterval(() => {
-      this.checkAlerts();
+      this.checkAlerts().catch(err => {
+        logger.error('Error in scheduled price alert check:', err);
+      });
     }, interval);
+    
+    return true;
   }
 
   /**
@@ -38,12 +46,14 @@ class PriceAlertService {
   stop() {
     if (!this.isRunning) {
       logger.warn('Price alert service is not running');
-      return;
+      return false;
     }
 
     clearInterval(this.checkInterval);
+    this.checkInterval = null;
     this.isRunning = false;
     logger.info('Price alert checking service stopped');
+    return true;
   }
 
   /**
@@ -53,15 +63,16 @@ class PriceAlertService {
     try {
       // You can replace this with your preferred price data source
       // Example using CryptoCompare API
-      const apiKey = config.crypto.cryptocompareApiKey;
+      const apiKey = config.crypto?.cryptocompareApiKey;
       
       // Get unique symbols from active price alerts
       const response = await axios.get('https://min-api.cryptocompare.com/data/pricemulti', {
         params: {
           fsyms: 'BTC,ETH,BNB,SOL,ADA,DOT,DOGE,XRP,AVAX,MATIC', // Default common symbols
           tsyms: 'USD',
-          api_key: apiKey
-        }
+          api_key: apiKey || '' // Fallback to empty string if no API key
+        },
+        timeout: 10000 // 10 second timeout
       });
 
       // Process response
@@ -77,7 +88,7 @@ class PriceAlertService {
         throw new Error('Invalid response from price API');
       }
     } catch (error) {
-      logger.error('Error fetching market prices:', error);
+      logger.error('Error fetching market prices:', error.message);
       return {};
     }
   }
@@ -101,6 +112,7 @@ class PriceAlertService {
       logger.info(`Price alert check completed: ${result.processed} processed, ${result.triggered} triggered`);
     } catch (error) {
       logger.error('Error during price alert check:', error);
+      throw error; // Re-throw to be caught by the caller
     }
   }
 }
