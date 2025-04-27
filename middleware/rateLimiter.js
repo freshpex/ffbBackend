@@ -1,29 +1,29 @@
-import rateLimit from 'express-rate-limit';
-import RedisStore from 'rate-limit-redis';
-import { createClient } from 'redis';
-import logger from './logger.js';
+import rateLimit from "express-rate-limit";
+import RedisStore from "rate-limit-redis";
+import { createClient } from "redis";
+import logger from "./logger.js";
 
 let redisClient;
 let useRedis = false;
 
 // Initialize Redis if configured
 const initRedisClient = async () => {
-  if (process.env.USE_REDIS === 'true' && process.env.REDIS_URL) {
+  if (process.env.USE_REDIS === "true" && process.env.REDIS_URL) {
     try {
       redisClient = createClient({
-        url: process.env.REDIS_URL
+        url: process.env.REDIS_URL,
       });
-      
-      redisClient.on('error', (err) => {
-        logger.error('Redis error:', err);
+
+      redisClient.on("error", (err) => {
+        logger.error("Redis error:", err);
         useRedis = false;
       });
-      
+
       await redisClient.connect();
       useRedis = true;
-      logger.info('Redis connected for rate limiting');
+      logger.info("Redis connected for rate limiting");
     } catch (error) {
-      logger.error('Redis connection failed:', error);
+      logger.error("Redis connection failed:", error);
       useRedis = false;
     }
   }
@@ -37,31 +37,32 @@ const getStore = () => {
   if (useRedis && redisClient) {
     return new RedisStore({
       sendCommand: (...args) => redisClient.sendCommand(args),
-      prefix: 'rate-limit:'
+      prefix: "rate-limit:",
     });
   }
-  
+
   return undefined; // Use default memory store
 };
 
 // Standard API rate limiter
 export const apiLimiter = rateLimit({
-  windowMs: Number(process.env.RATE_LIMIT_WINDOW) * 60 * 10000 || 15 * 60 * 10000,
-  max: Number(process.env.RATE_LIMIT_MAX) || 100, 
+  windowMs:
+    Number(process.env.RATE_LIMIT_WINDOW) * 60 * 10000 || 15 * 60 * 10000,
+  max: Number(process.env.RATE_LIMIT_MAX) || 100,
   standardHeaders: true,
   legacyHeaders: false,
   store: getStore(),
   message: {
     success: false,
     error: {
-      message: 'Too many requests, please try again later.',
-      type: 'rate_limit_exceeded'
-    }
+      message: "Too many requests, please try again later.",
+      type: "rate_limit_exceeded",
+    },
   },
   skip: (req) => {
     if (process.env.TRUSTED_IPS) {
-      const trustedIps = process.env.TRUSTED_IPS.split(',');
-      const clientIp = req.ip || req.headers['x-forwarded-for'];
+      const trustedIps = process.env.TRUSTED_IPS.split(",");
+      const clientIp = req.ip || req.headers["x-forwarded-for"];
       return trustedIps.includes(clientIp);
     }
     return false;
@@ -73,10 +74,10 @@ export const apiLimiter = rateLimit({
     logger.warn(`Rate limit exceeded for ${req.ip}`, {
       path: req.path,
       method: req.method,
-      user: req.user?.userId
+      user: req.user?.userId,
     });
     res.status(options.statusCode).json(options.message);
-  }
+  },
 });
 
 // Stricter auth endpoint limiter
@@ -89,9 +90,9 @@ export const authLimiter = rateLimit({
   message: {
     success: false,
     error: {
-      message: 'Too many authentication attempts, please try again later.',
-      type: 'auth_rate_limit_exceeded'
-    }
+      message: "Too many authentication attempts, please try again later.",
+      type: "auth_rate_limit_exceeded",
+    },
   },
   keyGenerator: (req) => {
     const email = req.body.email?.toLowerCase();
@@ -102,10 +103,10 @@ export const authLimiter = rateLimit({
     logger.warn(`Auth rate limit exceeded`, {
       ip: req.ip,
       email: email,
-      path: req.path
+      path: req.path,
     });
     res.status(options.statusCode).json(options.message);
-  }
+  },
 });
 
 // Trading endpoint limiter
@@ -118,13 +119,13 @@ export const tradingLimiter = rateLimit({
   message: {
     success: false,
     error: {
-      message: 'Trading request rate exceeded, please try again later.',
-      type: 'trading_rate_limit_exceeded'
-    }
+      message: "Trading request rate exceeded, please try again later.",
+      type: "trading_rate_limit_exceeded",
+    },
   },
   keyGenerator: (req) => {
     return req.user ? `trading:${req.user.userId}` : `ip:${req.ip}`;
-  }
+  },
 });
 
 export default { apiLimiter, authLimiter, tradingLimiter };

@@ -1,10 +1,10 @@
-import logger from './logger.js';
+import logger from "./logger.js";
 
 // Circuit breaker states
 const State = {
-  CLOSED: 'closed',
-  OPEN: 'open',
-  HALF_OPEN: 'half-open'
+  CLOSED: "closed",
+  OPEN: "open",
+  HALF_OPEN: "half-open",
 };
 
 class CircuitBreaker {
@@ -18,7 +18,7 @@ class CircuitBreaker {
     this.lastFailure = null;
     this.lastOpenTime = null;
     this.listeners = new Map();
-    
+
     // Required success count to close circuit from half-open state
     this.requiredSuccessesToClose = options.requiredSuccessesToClose || 2;
   }
@@ -26,9 +26,9 @@ class CircuitBreaker {
   // Execute a function with circuit breaker protection
   async execute(fn) {
     if (this.state === State.OPEN) {
-      throw new Error('Circuit is OPEN - request rejected');
+      throw new Error("Circuit is OPEN - request rejected");
     }
-    
+
     try {
       const result = await fn();
       this._onSuccess();
@@ -43,7 +43,7 @@ class CircuitBreaker {
   _onSuccess() {
     if (this.state === State.HALF_OPEN) {
       this.successCount++;
-      
+
       if (this.successCount >= this.requiredSuccessesToClose) {
         this.close();
       }
@@ -57,8 +57,11 @@ class CircuitBreaker {
   _onFailure(error) {
     this.failureCount++;
     this.lastFailure = Date.now();
-    
-    if (this.state === State.CLOSED && this.failureCount >= this.failureThreshold) {
+
+    if (
+      this.state === State.CLOSED &&
+      this.failureCount >= this.failureThreshold
+    ) {
       this.open();
     } else if (this.state === State.HALF_OPEN) {
       this.open();
@@ -70,7 +73,7 @@ class CircuitBreaker {
     if (this.state !== State.OPEN) {
       this.state = State.OPEN;
       this.lastOpenTime = Date.now();
-      
+
       // Schedule reset to half-open
       setTimeout(() => {
         this.state = State.HALF_OPEN;
@@ -101,7 +104,7 @@ class CircuitBreaker {
     this.monitorInterval = setInterval(() => {
       this.checkHealth();
     }, this.monitorInterval);
-    
+
     this.monitorInterval.unref();
   }
 

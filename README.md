@@ -7,6 +7,7 @@ Fidelity First Brokers (FFB) Backend is a secure, high-performance API server bu
 ## Key Features
 
 ### Authentication & Authorization
+
 - Secure JWT-based authentication system
 - Role-based access control (user, admin, superadmin)
 - Firebase authentication integration
@@ -14,12 +15,14 @@ Fidelity First Brokers (FFB) Backend is a secure, high-performance API server bu
 - API key management for third-party integrations
 
 ### User Management
+
 - User registration and profile management
 - KYC verification workflow
 - Security settings and login activity tracking
 - Payment method management
 
 ### Financial Operations
+
 - Deposit and withdrawal processing
 - Investment plans and user investments
 - Trading functionality
@@ -27,6 +30,7 @@ Fidelity First Brokers (FFB) Backend is a secure, high-performance API server bu
 - Referral program management
 
 ### Admin Dashboard API
+
 - Complete administrative functions
 - User management and oversight
 - Transaction processing and monitoring
@@ -36,12 +40,14 @@ Fidelity First Brokers (FFB) Backend is a secure, high-performance API server bu
 - Comprehensive analytics
 
 ### Market Data
+
 - Real-time cryptocurrency price data
 - Trading view data integration
 - Market news API
 - Price alerts system
 
 ### Security Features
+
 - Rate limiting to prevent abuse
 - Circuit breaker for external API protection
 - Validation for all inputs
@@ -103,6 +109,7 @@ ffbBackend/
 ## Getting Started
 
 ### Prerequisites
+
 - Node.js (v14 or higher)
 - MongoDB (v4.4 or higher)
 - npm or yarn package manager
@@ -116,12 +123,14 @@ ffbBackend/
    npm install
    ```
 3. Configure environment variables:
+
    - Create a `.env` file based on `.env.example`
    - Set the MongoDB connection string
    - Configure JWT secret key
    - Add other required API keys
 
 4. Start the development server:
+
    ```
    npm run dev
    ```
@@ -132,11 +141,13 @@ ffbBackend/
    ```
 
 ### Building for Production
+
 ```
 npm run build
 ```
 
 ### Deployment
+
 The application is configured for deployment on Vercel, AWS, or traditional servers.
 
 ## Environment Variables
@@ -159,18 +170,21 @@ Key environment variables include:
 The API follows RESTful conventions and includes the following main endpoints:
 
 ### Authentication
+
 - `POST /api/auth/register`: Register a new user
 - `POST /api/auth/login`: User login
 - `POST /api/auth/refresh-token`: Refresh JWT token
 - `POST /api/auth/forgot-password`: Password recovery
 
 ### User API
+
 - `GET /api/users/profile`: Get user profile
 - `PUT /api/users/profile`: Update user profile
 - `GET /api/users/transactions`: Get user transactions
 - `GET /api/dashboard`: Get user dashboard data
 
 ### Financial Operations
+
 - `POST /api/deposits`: Create deposit request
 - `GET /api/deposits`: Get deposit history
 - `POST /api/withdrawals`: Create withdrawal request
@@ -178,6 +192,7 @@ The API follows RESTful conventions and includes the following main endpoints:
 - `POST /api/investments`: Make new investment
 
 ### Admin API
+
 - `GET /api/admin/users`: Get all users
 - `GET /api/admin/transactions`: Get all transactions
 - `PUT /api/admin/transactions/:id`: Process transaction

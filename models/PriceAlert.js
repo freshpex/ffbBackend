@@ -1,72 +1,72 @@
-import mongoose from 'mongoose';
+import mongoose from "mongoose";
 
 const priceAlertSchema = new mongoose.Schema(
   {
     user: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true
+      ref: "User",
+      required: true,
     },
     symbol: {
       type: String,
       required: true,
       trim: true,
-      uppercase: true
+      uppercase: true,
     },
     condition: {
       type: String,
       required: true,
-      enum: ['above', 'below'],
-      default: 'above'
+      enum: ["above", "below"],
+      default: "above",
     },
     price: {
       type: Number,
-      required: true
+      required: true,
     },
     active: {
       type: Boolean,
-      default: true
+      default: true,
     },
     triggered: {
       type: Boolean,
-      default: false
+      default: false,
     },
     triggeredAt: {
       type: Date,
-      default: null
+      default: null,
     },
     repeatable: {
       type: Boolean,
-      default: false
+      default: false,
     },
     notificationMethods: {
       app: {
         type: Boolean,
-        default: true
+        default: true,
       },
       email: {
         type: Boolean,
-        default: false
+        default: false,
       },
       sms: {
         type: Boolean,
-        default: false
-      }
+        default: false,
+      },
     },
     createdAt: {
       type: Date,
-      default: Date.now
-    }
+      default: Date.now,
+    },
   },
   {
-    timestamps: true
-  }
+    timestamps: true,
+  },
 );
 
 // Add indexes for faster queries
 priceAlertSchema.index({ user: 1, active: 1 });
 priceAlertSchema.index({ symbol: 1, active: 1 });
 
-const PriceAlert = mongoose.model('PriceAlert', priceAlertSchema);
+const PriceAlert = mongoose.model("PriceAlert", priceAlertSchema);
 
 export default PriceAlert;

@@ -1,62 +1,62 @@
-import mongoose from 'mongoose';
+import mongoose from "mongoose";
 
 const marketNewsSchema = new mongoose.Schema(
   {
     title: {
       type: String,
       required: true,
-      trim: true
+      trim: true,
     },
     source: {
       type: String,
       required: true,
-      trim: true
+      trim: true,
     },
     url: {
       type: String,
-      required: true
+      required: true,
     },
     imageUrl: {
       type: String,
-      default: null
+      default: null,
     },
     summary: {
       type: String,
-      required: true
+      required: true,
     },
     content: {
       type: String,
-      default: null
+      default: null,
     },
     categories: {
       type: [String],
-      default: []
+      default: [],
     },
     symbols: {
       type: [String],
-      default: []
+      default: [],
     },
     sentiment: {
       type: String,
-      enum: ['positive', 'negative', 'neutral'],
-      default: 'neutral'
+      enum: ["positive", "negative", "neutral"],
+      default: "neutral",
     },
     publishedAt: {
       type: Date,
-      required: true
-    }
+      required: true,
+    },
   },
   {
-    timestamps: true
-  }
+    timestamps: true,
+  },
 );
 
 // Add indexes for faster queries
 marketNewsSchema.index({ publishedAt: -1 });
 marketNewsSchema.index({ categories: 1 });
 marketNewsSchema.index({ symbols: 1 });
-marketNewsSchema.index({ title: 'text', summary: 'text', content: 'text' });
+marketNewsSchema.index({ title: "text", summary: "text", content: "text" });
 
-const MarketNews = mongoose.model('MarketNews', marketNewsSchema);
+const MarketNews = mongoose.model("MarketNews", marketNewsSchema);
 
 export default MarketNews;

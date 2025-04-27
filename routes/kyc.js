@@ -1,8 +1,8 @@
-import express from 'express';
-import { verifyToken } from '../middleware/auth.js';
-import { asyncHandler } from '../middleware/errorHandler.js';
-import multer from 'multer';
-import UserKycController from '../controllers/UserKycController.js';
+import express from "express";
+import { verifyToken } from "../middleware/auth.js";
+import { asyncHandler } from "../middleware/errorHandler.js";
+import multer from "multer";
+import UserKycController from "../controllers/UserKycController.js";
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -11,16 +11,16 @@ const upload = multer({ storage: multer.memoryStorage() });
 router.use(verifyToken);
 
 router.post(
-  '/',
+  "/",
   upload.fields([
-    { name: 'idDocument', maxCount: 1 },
-    { name: 'proofOfAddress', maxCount: 1 },
-    { name: 'selfie', maxCount: 1 }
+    { name: "idDocument", maxCount: 1 },
+    { name: "proofOfAddress", maxCount: 1 },
+    { name: "selfie", maxCount: 1 },
   ]),
-  asyncHandler(UserKycController.submitKyc)
+  asyncHandler(UserKycController.submitKyc),
 );
 
 // Get user's KYC status
-router.get('/status', asyncHandler(UserKycController.getKycStatus));
+router.get("/status", asyncHandler(UserKycController.getKycStatus));
 
 export default router;

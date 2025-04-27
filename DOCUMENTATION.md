@@ -76,26 +76,31 @@ The FFB Backend follows a modular architecture based on the MVC (Model-View-Cont
 ### Development Environment Setup
 
 1. Clone the repository:
+
    ```bash
    git clone <repository-url>
    cd ffbBackend
    ```
 
 2. Install dependencies:
+
    ```bash
    npm install
    ```
 
 3. Set up environment variables:
+
    - Create a `.env` file in the root directory
    - Copy the contents from `.env.example` (if available)
    - Fill in all required values (see configuration section)
 
 4. Start MongoDB:
+
    - If using local MongoDB: `mongod --dbpath <your-db-path>`
    - If using MongoDB Atlas or other cloud provider, no action needed
 
 5. Start the development server:
+
    ```bash
    npm run dev
    ```
@@ -111,26 +116,27 @@ The application configuration is managed through environment variables and the `
 
 #### Environment Variables
 
-| Variable | Description | Default | Required |
-|----------|-------------|---------|----------|
-| PORT | Server port | 5000 | No |
-| NODE_ENV | Environment (development, production, test) | development | No |
-| MONGODB_URI | MongoDB connection string | None | Yes |
-| JWT_SECRET | Secret key for JWT tokens | None | Yes |
-| JWT_EXPIRY | JWT token expiration time | 24h | No |
-| LOG_LEVEL | Logging level | info (production), debug (dev) | No |
-| BINANCE_API_KEY | Binance API key | None | No |
-| BINANCE_API_SECRET | Binance API secret | None | No |
-| USE_REDIS | Enable Redis caching | false | No |
-| REDIS_URL | Redis connection URL | redis://localhost:6379 | No |
-| CORS_ORIGIN | CORS allowed origins | * | No |
-| UPLOAD_MAX_SIZE | Max upload file size in bytes | 5242880 (5MB) | No |
+| Variable           | Description                                 | Default                        | Required |
+| ------------------ | ------------------------------------------- | ------------------------------ | -------- |
+| PORT               | Server port                                 | 5000                           | No       |
+| NODE_ENV           | Environment (development, production, test) | development                    | No       |
+| MONGODB_URI        | MongoDB connection string                   | None                           | Yes      |
+| JWT_SECRET         | Secret key for JWT tokens                   | None                           | Yes      |
+| JWT_EXPIRY         | JWT token expiration time                   | 24h                            | No       |
+| LOG_LEVEL          | Logging level                               | info (production), debug (dev) | No       |
+| BINANCE_API_KEY    | Binance API key                             | None                           | No       |
+| BINANCE_API_SECRET | Binance API secret                          | None                           | No       |
+| USE_REDIS          | Enable Redis caching                        | false                          | No       |
+| REDIS_URL          | Redis connection URL                        | redis://localhost:6379         | No       |
+| CORS_ORIGIN        | CORS allowed origins                        | \*                             | No       |
+| UPLOAD_MAX_SIZE    | Max upload file size in bytes               | 5242880 (5MB)                  | No       |
 
 #### Configuration Structure
 
 The `config.js` file in the `config` directory provides application configuration with sensible defaults. It reads from environment variables and exposes a structured configuration object.
 
 Main configuration sections:
+
 - Server settings
 - Database options
 - Authentication parameters
@@ -146,6 +152,7 @@ The FFB Backend exposes a RESTful API. All endpoints are prefixed with `/api`.
 ### Authentication Endpoints
 
 #### Register User
+
 - **URL**: `/api/auth/register`
 - **Method**: `POST`
 - **Auth Required**: No
@@ -161,6 +168,7 @@ The FFB Backend exposes a RESTful API. All endpoints are prefixed with `/api`.
 - **Response**: User object with JWT token
 
 #### Login User
+
 - **URL**: `/api/auth/login`
 - **Method**: `POST`
 - **Auth Required**: No
@@ -174,6 +182,7 @@ The FFB Backend exposes a RESTful API. All endpoints are prefixed with `/api`.
 - **Response**: User object with JWT token
 
 #### Additional Auth Endpoints
+
 - `POST /api/auth/refresh-token`: Refresh JWT token
 - `POST /api/auth/forgot-password`: Initiate password reset
 - `POST /api/auth/reset-password`: Complete password reset
@@ -183,12 +192,14 @@ The FFB Backend exposes a RESTful API. All endpoints are prefixed with `/api`.
 ### User Endpoints
 
 #### Get User Profile
+
 - **URL**: `/api/users/profile`
 - **Method**: `GET`
 - **Auth Required**: Yes
 - **Response**: User profile object
 
 #### Update User Profile
+
 - **URL**: `/api/users/profile`
 - **Method**: `PUT`
 - **Auth Required**: Yes
@@ -209,6 +220,7 @@ The FFB Backend exposes a RESTful API. All endpoints are prefixed with `/api`.
 - **Response**: Updated user object
 
 #### Additional User Endpoints
+
 - `GET /api/users/security`: Get security settings
 - `PUT /api/users/security`: Update security settings
 - `GET /api/users/payment-methods`: Get user payment methods
@@ -219,34 +231,40 @@ The FFB Backend exposes a RESTful API. All endpoints are prefixed with `/api`.
 ### Financial Operations Endpoints
 
 #### Get Dashboard Data
+
 - **URL**: `/api/dashboard`
 - **Method**: `GET`
 - **Auth Required**: Yes
 - **Response**: Dashboard data object
 
 #### Deposits
+
 - `POST /api/deposits`: Create deposit request
 - `GET /api/deposits`: Get deposit history
 - `GET /api/deposits/:id`: Get deposit details
 
 #### Withdrawals
+
 - `POST /api/withdrawals`: Create withdrawal request
 - `GET /api/withdrawals`: Get withdrawal history
 - `GET /api/withdrawals/:id`: Get withdrawal details
 
 #### Investments
+
 - `GET /api/investments`: Get investment options
 - `GET /api/investments/plans`: Get available investment plans
 - `POST /api/investments`: Make new investment
 - `GET /api/investments/user`: Get user's investments
 
 #### Trading Operations
+
 - `GET /api/trading/market`: Get market data
 - `POST /api/trading/orders`: Place new order
 - `GET /api/trading/orders`: Get user's orders
 - `GET /api/trading/orders/:id`: Get order details
 
 #### Price Alerts
+
 - `POST /api/price-alerts`: Create new price alert
 - `GET /api/price-alerts`: Get user's price alerts
 - `DELETE /api/price-alerts/:id`: Delete price alert
@@ -254,6 +272,7 @@ The FFB Backend exposes a RESTful API. All endpoints are prefixed with `/api`.
 ### Admin Endpoints
 
 #### User Management
+
 - `GET /api/admin/users`: Get all users (with filtering)
 - `GET /api/admin/users/:id`: Get user details
 - `POST /api/admin/users`: Create new user
@@ -261,23 +280,27 @@ The FFB Backend exposes a RESTful API. All endpoints are prefixed with `/api`.
 - `DELETE /api/admin/users/:id`: Delete user
 
 #### Transaction Management
+
 - `GET /api/admin/transactions`: Get all transactions
 - `GET /api/admin/transactions/:id`: Get transaction details
 - `PUT /api/admin/transactions/:id`: Process transaction
 
 #### KYC Management
+
 - `GET /api/admin/kyc`: Get all KYC requests
 - `GET /api/admin/kyc/:id`: Get KYC request details
 - `PUT /api/admin/kyc/:id/approve`: Approve KYC request
 - `PUT /api/admin/kyc/:id/reject`: Reject KYC request
 
 #### Support Tickets
+
 - `GET /api/admin/support`: Get all support tickets
 - `GET /api/admin/support/:id`: Get ticket details
 - `PUT /api/admin/support/:id`: Update ticket status
 - `POST /api/admin/support/:id/reply`: Add reply to ticket
 
 #### Analytics
+
 - `GET /api/admin/analytics/overview`: Get analytics overview
 - `GET /api/admin/analytics/users`: Get user growth analytics
 - `GET /api/admin/analytics/financial`: Get financial analytics
@@ -285,6 +308,7 @@ The FFB Backend exposes a RESTful API. All endpoints are prefixed with `/api`.
 - `GET /api/admin/analytics/performance`: Get performance analytics
 
 #### System Settings
+
 - `GET /api/admin/settings`: Get all system settings
 - `PUT /api/admin/settings`: Update system settings
 - `POST /api/admin/settings`: Create new setting
@@ -650,18 +674,18 @@ The `auth.js` middleware verifies JWT tokens and populates the request with user
 ```javascript
 // Simplified example
 const authenticateUser = (req, res, next) => {
-  const token = req.header('Authorization')?.replace('Bearer ', '');
-  
+  const token = req.header("Authorization")?.replace("Bearer ", "");
+
   if (!token) {
     return res.status(401).json({
       success: false,
       error: {
-        code: 'authentication_required',
-        message: 'Authentication required'
-      }
+        code: "authentication_required",
+        message: "Authentication required",
+      },
     });
   }
-  
+
   try {
     const decoded = jwt.verify(token, config.auth.jwtSecret);
     req.user = decoded;
@@ -670,9 +694,9 @@ const authenticateUser = (req, res, next) => {
     return res.status(401).json({
       success: false,
       error: {
-        code: 'invalid_token',
-        message: 'Invalid or expired token'
-      }
+        code: "invalid_token",
+        message: "Invalid or expired token",
+      },
     });
   }
 };
@@ -690,22 +714,22 @@ const checkRole = (roles) => {
       return res.status(401).json({
         success: false,
         error: {
-          code: 'authentication_required',
-          message: 'Authentication required'
-        }
+          code: "authentication_required",
+          message: "Authentication required",
+        },
       });
     }
-    
+
     if (!roles.includes(req.user.role)) {
       return res.status(403).json({
         success: false,
         error: {
-          code: 'permission_denied',
-          message: 'You do not have permission to access this resource'
-        }
+          code: "permission_denied",
+          message: "You do not have permission to access this resource",
+        },
       });
     }
-    
+
     next();
   };
 };
@@ -720,6 +744,7 @@ The application uses various middleware for cross-cutting concerns:
 Location: `middleware/auth.js`
 
 Provides:
+
 - JWT validation
 - Role-based access control
 - API key authentication
@@ -729,6 +754,7 @@ Provides:
 Location: `middleware/errorHandler.js`
 
 Features:
+
 - Centralized error handling
 - Standardized error responses
 - Error classification
@@ -739,6 +765,7 @@ Features:
 Location: `middleware/validate.js`
 
 Features:
+
 - Input validation using express-validator
 - Schema-based validation
 - Custom validation rules
@@ -749,6 +776,7 @@ Features:
 Location: `middleware/rateLimiter.js`
 
 Features:
+
 - Request rate limiting
 - Protection against brute force attacks
 - IP-based or user-based limiting
@@ -759,6 +787,7 @@ Features:
 Location: `middleware/logger.js`
 
 Features:
+
 - Request logging
 - Response time measurement
 - User activity tracking
@@ -769,6 +798,7 @@ Features:
 Location: `middleware/performance.js`
 
 Features:
+
 - Response time tracking
 - Slow request identification
 - Performance metrics collection
@@ -778,6 +808,7 @@ Features:
 Location: `middleware/circuitBreaker.js`
 
 Features:
+
 - Protection for external service calls
 - Automatic failure detection
 - Service degradation handling
@@ -788,6 +819,7 @@ Features:
 Location: `middleware/cache.js`
 
 Features:
+
 - Response caching
 - Cache invalidation strategies
 - TTL configuration
@@ -802,6 +834,7 @@ Controllers handle the application logic for each API endpoint. They are organiz
 Location: `controllers/authController.js`
 
 Key functions:
+
 - `register`: User registration
 - `login`: User authentication
 - `refreshToken`: JWT token renewal
@@ -813,6 +846,7 @@ Key functions:
 Location: `controllers/User*.js`
 
 Key modules:
+
 - `UserProfileController`: Profile management
 - `UserSecurityController`: Security settings
 - `UserPaymentMethodsController`: Payment methods
@@ -821,6 +855,7 @@ Key modules:
 ### Financial Controllers
 
 Key modules:
+
 - `DepositController`: Deposit processing
 - `WithdrawalController`: Withdrawal processing
 - `InvestmentController`: Investment operations
@@ -831,6 +866,7 @@ Key modules:
 Location: `controllers/Admin*.js`
 
 Key modules:
+
 - `AdminUserController`: User management
 - `AdminTransactionController`: Transaction processing
 - `AdminKycController`: KYC verification
@@ -841,6 +877,7 @@ Key modules:
 ### Market Data Controllers
 
 Key modules:
+
 - `MarketNewsController`: Market news
 - `PriceAlertController`: Price alerts
 - `OrderController`: Trading orders
@@ -854,6 +891,7 @@ Services handle external integrations and complex business logic:
 Location: `services/binanceService.js`
 
 Features:
+
 - Market data retrieval
 - Price information
 - Trading chart data
@@ -863,6 +901,7 @@ Features:
 Location: `services/websocket.js`
 
 Features:
+
 - Real-time data streaming
 - Market updates
 - Trading notifications
@@ -906,34 +945,34 @@ The `errorHandler.js` middleware processes errors and formats responses:
 ```javascript
 // Simplified example
 export const errorHandler = (err, req, res, next) => {
-  logger.error(`Error: ${err.message}`, { 
+  logger.error(`Error: ${err.message}`, {
     stack: err.stack,
     path: req.path,
     method: req.method,
-    user: req.user?.id
+    user: req.user?.id,
   });
-  
+
   // Determine error type and response
   if (err instanceof ValidationError) {
     return res.status(400).json({
       success: false,
       error: {
-        code: 'validation_error',
-        message: 'Validation failed',
-        details: err.details
-      }
+        code: "validation_error",
+        message: "Validation failed",
+        details: err.details,
+      },
     });
   }
-  
+
   // Handle other error types...
-  
+
   // Default error response
   return res.status(500).json({
     success: false,
     error: {
-      code: 'server_error',
-      message: 'An unexpected error occurred'
-    }
+      code: "server_error",
+      message: "An unexpected error occurred",
+    },
   });
 };
 ```
@@ -954,29 +993,31 @@ The application uses express-validator for input validation:
 ```javascript
 // User creation validation schema
 const createUserValidation = [
-  body('email')
+  body("email")
     .isEmail()
-    .withMessage('Must be a valid email address')
+    .withMessage("Must be a valid email address")
     .normalizeEmail(),
-  body('firstName')
+  body("firstName")
     .notEmpty()
-    .withMessage('First name is required')
+    .withMessage("First name is required")
     .trim()
     .isLength({ min: 2, max: 50 })
-    .withMessage('First name must be between 2 and 50 characters'),
-  body('lastName')
+    .withMessage("First name must be between 2 and 50 characters"),
+  body("lastName")
     .notEmpty()
-    .withMessage('Last name is required')
+    .withMessage("Last name is required")
     .trim()
     .isLength({ min: 2, max: 50 })
-    .withMessage('Last name must be between 2 and 50 characters'),
-  body('password')
+    .withMessage("Last name must be between 2 and 50 characters"),
+  body("password")
     .notEmpty()
-    .withMessage('Password is required')
+    .withMessage("Password is required")
     .isLength({ min: 8 })
-    .withMessage('Password must be at least 8 characters long')
+    .withMessage("Password must be at least 8 characters long")
     .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/)
-    .withMessage('Password must contain at least one uppercase letter, one lowercase letter, and one number')
+    .withMessage(
+      "Password must contain at least one uppercase letter, one lowercase letter, and one number",
+    ),
 ];
 ```
 
@@ -986,29 +1027,29 @@ The `validate.js` middleware checks validation results:
 
 ```javascript
 // Simplified example
-export const validate = validations => {
+export const validate = (validations) => {
   return async (req, res, next) => {
-    await Promise.all(validations.map(validation => validation.run(req)));
-    
+    await Promise.all(validations.map((validation) => validation.run(req)));
+
     const errors = validationResult(req);
-    
+
     if (errors.isEmpty()) {
       return next();
     }
-    
+
     // Format validation errors
-    const errorMessages = errors.array().map(err => ({
+    const errorMessages = errors.array().map((err) => ({
       field: err.param,
-      message: err.msg
+      message: err.msg,
     }));
-    
+
     return res.status(400).json({
       success: false,
       error: {
-        code: 'validation_error',
-        message: 'Validation failed',
-        details: errorMessages
-      }
+        code: "validation_error",
+        message: "Validation failed",
+        details: errorMessages,
+      },
     });
   };
 };
@@ -1026,17 +1067,17 @@ const logger = winston.createLogger({
   level: config.logging.level,
   format: winston.format.combine(
     winston.format.timestamp(),
-    winston.format.json()
+    winston.format.json(),
   ),
   transports: [
     new winston.transports.Console(),
     new winston.transports.DailyRotateFile({
-      filename: 'logs/application-%DATE%.log',
-      datePattern: 'YYYY-MM-DD',
-      maxSize: '20m',
-      maxFiles: '14d'
-    })
-  ]
+      filename: "logs/application-%DATE%.log",
+      datePattern: "YYYY-MM-DD",
+      maxSize: "20m",
+      maxFiles: "14d",
+    }),
+  ],
 });
 ```
 
@@ -1052,22 +1093,22 @@ const logger = winston.createLogger({
 
 ```javascript
 // Error logging
-logger.error('Failed to process transaction', {
+logger.error("Failed to process transaction", {
   transactionId: tx.id,
   userId: user.id,
-  error: err.message
+  error: err.message,
 });
 
 // Info logging
-logger.info('User logged in successfully', {
+logger.info("User logged in successfully", {
   userId: user.id,
-  ipAddress: req.ip
+  ipAddress: req.ip,
 });
 
 // Debug logging
-logger.debug('Processing deposit request', {
+logger.debug("Processing deposit request", {
   amount: req.body.amount,
-  method: req.body.method
+  method: req.body.method,
 });
 ```
 
@@ -1259,6 +1300,7 @@ Common issues and solutions:
 **Problem**: JWT token validation fails
 
 **Solution**:
+
 1. Check JWT secret in environment variables
 2. Verify token expiration time
 3. Ensure clocks are synchronized
@@ -1269,6 +1311,7 @@ Common issues and solutions:
 **Problem**: Cannot connect to MongoDB
 
 **Solution**:
+
 1. Verify MongoDB URI in environment variables
 2. Check MongoDB server status
 3. Verify network connectivity
@@ -1280,6 +1323,7 @@ Common issues and solutions:
 **Problem**: API returns 500 errors
 
 **Solution**:
+
 1. Check application logs for errors
 2. Verify input validation
 3. Check external service connectivity
@@ -1291,6 +1335,7 @@ Common issues and solutions:
 **Problem**: Slow API responses
 
 **Solution**:
+
 1. Check database queries and indexes
 2. Review caching implementation
 3. Monitor external API response times

@@ -1,6 +1,6 @@
-import fs from 'fs';
-import path from 'path';
-import logger from '../middleware/logger.js';
+import fs from "fs";
+import path from "path";
+import logger from "../middleware/logger.js";
 
 /**
  * Ensures that a directory exists, creating it if it doesn't
@@ -40,5 +40,5 @@ export const removeFile = (filePath) => {
 
 export default {
   ensureUploadDir,
-  removeFile
+  removeFile,
 };

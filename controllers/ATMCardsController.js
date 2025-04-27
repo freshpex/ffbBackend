@@ -1,22 +1,28 @@
-import ATMCard from '../models/ATMCard.js';
-import Transaction from '../models/Transaction.js';
-import User from '../models/User.js';
-import logger from '../middleware/logger.js';
-import { ApiError } from '../middleware/errorHandler.js';
-import pkg from 'uuid';
+import ATMCard from "../models/ATMCard.js";
+import Transaction from "../models/Transaction.js";
+import User from "../models/User.js";
+import logger from "../middleware/logger.js";
+import { ApiError } from "../middleware/errorHandler.js";
+import pkg from "uuid";
 const { v4: uuidv4 } = pkg;
 
 // Helper functions for card generation
 function generateCardNumber() {
   // Generate a 16-digit card number starting with 4 (like Visa)
-  return '4' + Array(15).fill(0).map(() => Math.floor(Math.random() * 10)).join('');
+  return (
+    "4" +
+    Array(15)
+      .fill(0)
+      .map(() => Math.floor(Math.random() * 10))
+      .join("")
+  );
 }
 
 function getExpiryDate() {
   // Set expiry date to 3 years from now
   const date = new Date();
   date.setFullYear(date.getFullYear() + 3);
-  return `${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getFullYear()).slice(2)}`;
+  return `${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getFullYear()).slice(2)}`;
 }
 
 function generateCVV() {
@@ -28,15 +34,15 @@ function generateCVV() {
 export const getAllCards = async (req, res, next) => {
   try {
     const userId = req.user._id;
-    
+
     const cards = await ATMCard.find({ user: userId });
-    
+
     res.status(200).json({
       success: true,
-      data: cards
+      data: cards,
     });
   } catch (error) {
-    logger.error('Error fetching user cards:', error);
+    logger.error("Error fetching user cards:", error);
     next(error);
   }
 };
@@ -46,16 +52,16 @@ export const getCardById = async (req, res, next) => {
   try {
     const { id } = req.params;
     const userId = req.user._id;
-    
+
     const card = await ATMCard.findOne({ _id: id, user: userId });
-    
+
     if (!card) {
-      throw new ApiError('Card not found', 404, 'not_found');
+      throw new ApiError("Card not found", 404, "not_found");
     }
-    
+
     res.status(200).json({
       success: true,
-      data: card
+      data: card,
     });
   } catch (error) {
     logger.error(`Error fetching card ${req.params.id}:`, error);
@@ -67,68 +73,83 @@ export const getCardById = async (req, res, next) => {
 export const requestCard = async (req, res, next) => {
   try {
     const userId = req.user._id;
-    const { 
-      type = 'virtual-debit', 
+    const {
+      type = "virtual-debit",
       name = `${req.user.firstName} ${req.user.lastName}`,
-      shippingAddress, 
+      shippingAddress,
       billingAddress,
-      cardDesign
+      cardDesign,
     } = req.body;
-    
+
     // Check if user has reached card limit
     const userCardCount = await ATMCard.countDocuments({ user: userId });
     const cardLimit = 3; // Maximum 3 cards per user
-    
+
     if (userCardCount >= cardLimit) {
-      throw new ApiError(`You have reached the limit of ${cardLimit} cards`, 400, 'limit_reached');
+      throw new ApiError(
+        `You have reached the limit of ${cardLimit} cards`,
+        400,
+        "limit_reached",
+      );
     }
-    
+
     // Validate card type
-    if (!['virtual-debit', 'standard-debit', 'premium-debit'].includes(type)) {
-      throw new ApiError('Invalid card type. Must be virtual-debit, standard-debit, or premium-debit', 400, 'validation_error');
+    if (!["virtual-debit", "standard-debit", "premium-debit"].includes(type)) {
+      throw new ApiError(
+        "Invalid card type. Must be virtual-debit, standard-debit, or premium-debit",
+        400,
+        "validation_error",
+      );
     }
-    
+
     // For physical cards, shipping address is required
-    if (['standard-debit', 'premium-debit'].includes(type) && !shippingAddress) {
-      throw new ApiError('Shipping address is required for physical cards', 400, 'validation_error');
+    if (
+      ["standard-debit", "premium-debit"].includes(type) &&
+      !shippingAddress
+    ) {
+      throw new ApiError(
+        "Shipping address is required for physical cards",
+        400,
+        "validation_error",
+      );
     }
-    
+
     // Generate card details
     const cardNumber = generateCardNumber();
     const expiryDate = getExpiryDate();
     const cvv = generateCVV();
-    
+
     // Create new card request
     const newCard = new ATMCard({
       user: userId,
       cardNumber,
       name,
       type,
-      status: 'pending',
+      status: "pending",
       expiryDate,
       cvv,
-      currency: 'USD',
+      currency: "USD",
       shippingAddress: shippingAddress || {},
-      billingAddress: billingAddress || {}
+      billingAddress: billingAddress || {},
     });
 
     if (cardDesign && (cardDesign.primaryColor || cardDesign.secondaryColor)) {
       newCard.cardDesign = {
         primaryColor: cardDesign.primaryColor || null,
         secondaryColor: cardDesign.secondaryColor || null,
-        useCustomColors: true
+        useCustomColors: true,
       };
     }
-    
+
     await newCard.save();
-    
+
     res.status(201).json({
       success: true,
       message: `Your ${type} card request has been submitted and is pending approval`,
-      data: newCard
+      data: newCard,
     });
   } catch (error) {
-    logger.error('Error requesting new card:', error);
+    logger.error("Error requesting new card:", error);
     next(error);
   }
 };
@@ -139,42 +160,50 @@ export const iterateVirtualCard = async (req, res, next) => {
     const { id } = req.params;
     const userId = req.user._id;
     const { reason } = req.body;
-    
+
     const card = await ATMCard.findOne({ _id: id, user: userId });
-    
+
     if (!card) {
-      throw new ApiError('Card not found', 404, 'not_found');
+      throw new ApiError("Card not found", 404, "not_found");
     }
-    
+
     // Check if card is virtual
-    if (card.type !== 'virtual-debit') {
-      throw new ApiError('Only virtual cards can be iterated', 400, 'invalid_operation');
+    if (card.type !== "virtual-debit") {
+      throw new ApiError(
+        "Only virtual cards can be iterated",
+        400,
+        "invalid_operation",
+      );
     }
-    
+
     // Check card status
-    if (card.status !== 'active') {
-      throw new ApiError('Card must be active to iterate', 400, 'invalid_status');
+    if (card.status !== "active") {
+      throw new ApiError(
+        "Card must be active to iterate",
+        400,
+        "invalid_status",
+      );
     }
-    
+
     // Check if card is frozen
     if (card.frozen) {
-      throw new ApiError('Cannot iterate a frozen card', 400, 'card_frozen');
+      throw new ApiError("Cannot iterate a frozen card", 400, "card_frozen");
     }
-    
+
     // Save current card details to history
     const currentCardDetails = {
       cardNumber: card.cardNumber,
       cvv: card.cvv,
       expiryDate: card.expiryDate,
       createdAt: card.lastIteratedAt || card.createdAt,
-      reason: reason || 'User requested new card details'
+      reason: reason || "User requested new card details",
     };
-    
+
     // Generate new card details
     const newCardNumber = generateCardNumber();
     const newExpiryDate = getExpiryDate();
     const newCVV = generateCVV();
-    
+
     // Update card with new details
     card.cardHistory = card.cardHistory || [];
     card.cardHistory.push(currentCardDetails);
@@ -183,33 +212,33 @@ export const iterateVirtualCard = async (req, res, next) => {
     card.cvv = newCVV;
     card.iterationCount += 1;
     card.lastIteratedAt = new Date();
-    
+
     await card.save();
-    
+
     // Create a transaction record for the card iteration
     const transaction = new Transaction({
       user: userId,
-      type: 'system',
-      category: 'card_iteration',
+      type: "system",
+      category: "card_iteration",
       description: `Virtual card ${card.cardNumber.slice(-4)} details refreshed`,
-      status: 'completed',
+      status: "completed",
       metadata: {
         cardId: card._id,
         iterationCount: card.iterationCount,
-        reason
-      }
+        reason,
+      },
     });
-    
+
     await transaction.save();
-    
+
     res.status(200).json({
       success: true,
-      message: 'Virtual card details refreshed successfully',
+      message: "Virtual card details refreshed successfully",
       data: {
         cardId: card._id,
         iterationCount: card.iterationCount,
-        lastIteratedAt: card.lastIteratedAt
-      }
+        lastIteratedAt: card.lastIteratedAt,
+      },
     });
   } catch (error) {
     logger.error(`Error iterating virtual card ${req.params.id}:`, error);
@@ -222,24 +251,28 @@ export const cancelCardRequest = async (req, res, next) => {
   try {
     const { id } = req.params;
     const userId = req.user._id;
-    
+
     const card = await ATMCard.findOne({ _id: id, user: userId });
-    
+
     if (!card) {
-      throw new ApiError('Card not found', 404, 'not_found');
+      throw new ApiError("Card not found", 404, "not_found");
     }
-    
-    if (card.status !== 'pending') {
-      throw new ApiError(`Cannot cancel card in ${card.status} status`, 400, 'invalid_status');
+
+    if (card.status !== "pending") {
+      throw new ApiError(
+        `Cannot cancel card in ${card.status} status`,
+        400,
+        "invalid_status",
+      );
     }
-    
-    card.status = 'cancelled';
+
+    card.status = "cancelled";
     await card.save();
-    
+
     res.status(200).json({
       success: true,
-      message: 'Card request cancelled successfully',
-      data: card
+      message: "Card request cancelled successfully",
+      data: card,
     });
   } catch (error) {
     logger.error(`Error cancelling card request ${req.params.id}:`, error);
@@ -252,25 +285,29 @@ export const freezeCard = async (req, res, next) => {
   try {
     const { id } = req.params;
     const userId = req.user._id;
-    
+
     const card = await ATMCard.findOne({ _id: id, user: userId });
-    
+
     if (!card) {
-      throw new ApiError('Card not found', 404, 'not_found');
+      throw new ApiError("Card not found", 404, "not_found");
     }
-    
-    if (card.status !== 'active') {
-      throw new ApiError(`Cannot freeze card in ${card.status} status`, 400, 'invalid_status');
+
+    if (card.status !== "active") {
+      throw new ApiError(
+        `Cannot freeze card in ${card.status} status`,
+        400,
+        "invalid_status",
+      );
     }
-    
-    card.status = 'frozen';
+
+    card.status = "frozen";
     card.frozenAt = new Date();
     await card.save();
-    
+
     res.status(200).json({
       success: true,
-      message: 'Card frozen successfully',
-      data: card
+      message: "Card frozen successfully",
+      data: card,
     });
   } catch (error) {
     logger.error(`Error freezing card ${req.params.id}:`, error);
@@ -283,25 +320,25 @@ export const unfreezeCard = async (req, res, next) => {
   try {
     const { id } = req.params;
     const userId = req.user._id;
-    
+
     const card = await ATMCard.findOne({ _id: id, user: userId });
-    
+
     if (!card) {
-      throw new ApiError('Card not found', 404, 'not_found');
+      throw new ApiError("Card not found", 404, "not_found");
     }
-    
-    if (card.status !== 'frozen') {
-      throw new ApiError(`Card is not frozen`, 400, 'invalid_status');
+
+    if (card.status !== "frozen") {
+      throw new ApiError(`Card is not frozen`, 400, "invalid_status");
     }
-    
-    card.status = 'active';
+
+    card.status = "active";
     card.frozenAt = null;
     await card.save();
-    
+
     res.status(200).json({
       success: true,
-      message: 'Card unfrozen successfully',
-      data: card
+      message: "Card unfrozen successfully",
+      data: card,
     });
   } catch (error) {
     logger.error(`Error unfreezing card ${req.params.id}:`, error);
@@ -315,30 +352,38 @@ export const updateCardLimits = async (req, res, next) => {
     const { id } = req.params;
     const userId = req.user._id;
     const { dailyLimit, monthlyLimit } = req.body;
-    
+
     if (!dailyLimit && !monthlyLimit) {
-      throw new ApiError('At least one limit must be specified', 400, 'validation_error');
+      throw new ApiError(
+        "At least one limit must be specified",
+        400,
+        "validation_error",
+      );
     }
-    
+
     const card = await ATMCard.findOne({ _id: id, user: userId });
-    
+
     if (!card) {
-      throw new ApiError('Card not found', 404, 'not_found');
+      throw new ApiError("Card not found", 404, "not_found");
     }
-    
-    if (card.status !== 'active' && card.status !== 'frozen') {
-      throw new ApiError(`Cannot update limits for card in ${card.status} status`, 400, 'invalid_status');
+
+    if (card.status !== "active" && card.status !== "frozen") {
+      throw new ApiError(
+        `Cannot update limits for card in ${card.status} status`,
+        400,
+        "invalid_status",
+      );
     }
-    
+
     if (dailyLimit) card.limits.daily = dailyLimit;
     if (monthlyLimit) card.limits.monthly = monthlyLimit;
-    
+
     await card.save();
-    
+
     res.status(200).json({
       success: true,
-      message: 'Card limits updated successfully',
-      data: card
+      message: "Card limits updated successfully",
+      data: card,
     });
   } catch (error) {
     logger.error(`Error updating card limits ${req.params.id}:`, error);
@@ -351,20 +396,27 @@ export const getCardTransactions = async (req, res, next) => {
   try {
     const { id } = req.params;
     const userId = req.user._id;
-    const { page = 1, limit = 10, category, type, startDate, endDate } = req.query;
-    
+    const {
+      page = 1,
+      limit = 10,
+      category,
+      type,
+      startDate,
+      endDate,
+    } = req.query;
+
     const card = await ATMCard.findOne({ _id: id, user: userId });
-    
+
     if (!card) {
-      throw new ApiError('Card not found', 404, 'not_found');
+      throw new ApiError("Card not found", 404, "not_found");
     }
-    
+
     // Build query
-    const query = { 
-      cardId: id, 
-      user: userId 
+    const query = {
+      cardId: id,
+      user: userId,
     };
-    
+
     // Add optional filters
     if (category) query.category = category;
     if (type) query.type = type;
@@ -373,19 +425,19 @@ export const getCardTransactions = async (req, res, next) => {
       if (startDate) query.createdAt.$gte = new Date(startDate);
       if (endDate) query.createdAt.$lte = new Date(endDate);
     }
-    
+
     // Pagination
     const skip = (parseInt(page) - 1) * parseInt(limit);
-    
+
     // Get transactions count
     const total = await Transaction.countDocuments(query);
-    
+
     // Get transactions
     const transactions = await Transaction.find(query)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
-    
+
     res.status(200).json({
       success: true,
       data: transactions,
@@ -393,8 +445,8 @@ export const getCardTransactions = async (req, res, next) => {
         total,
         page: parseInt(page),
         limit: parseInt(limit),
-        pages: Math.ceil(total / parseInt(limit))
-      }
+        pages: Math.ceil(total / parseInt(limit)),
+      },
     });
   } catch (error) {
     logger.error(`Error fetching card transactions ${req.params.id}:`, error);
@@ -407,85 +459,115 @@ export const createCardTransaction = async (req, res, next) => {
   try {
     const { id } = req.params;
     const userId = req.user._id;
-    const { 
-      amount, 
-      merchantName, 
+    const {
+      amount,
+      merchantName,
       merchantId,
       category,
-      type = 'purchase',
-      description
+      type = "purchase",
+      description,
     } = req.body;
-    
+
     // Validate required fields
     if (!amount || amount <= 0) {
-      throw new ApiError('Valid transaction amount is required', 400, 'validation_error');
+      throw new ApiError(
+        "Valid transaction amount is required",
+        400,
+        "validation_error",
+      );
     }
-    
+
     if (!merchantName) {
-      throw new ApiError('Merchant name is required', 400, 'validation_error');
+      throw new ApiError("Merchant name is required", 400, "validation_error");
     }
-    
+
     // Validate transaction type
-    const validTypes = ['purchase', 'refund', 'withdrawal', 'deposit'];
+    const validTypes = ["purchase", "refund", "withdrawal", "deposit"];
     if (!validTypes.includes(type)) {
-      throw new ApiError(`Invalid transaction type. Must be one of: ${validTypes.join(', ')}`, 400, 'validation_error');
+      throw new ApiError(
+        `Invalid transaction type. Must be one of: ${validTypes.join(", ")}`,
+        400,
+        "validation_error",
+      );
     }
-    
+
     // Find the card
     const card = await ATMCard.findOne({ _id: id, user: userId });
-    
+
     if (!card) {
-      throw new ApiError('Card not found', 404, 'not_found');
+      throw new ApiError("Card not found", 404, "not_found");
     }
-    
+
     // Check card status
-    if (card.status !== 'active') {
-      throw new ApiError(`Cannot create transaction with card in ${card.status} status`, 400, 'invalid_card_status');
+    if (card.status !== "active") {
+      throw new ApiError(
+        `Cannot create transaction with card in ${card.status} status`,
+        400,
+        "invalid_card_status",
+      );
     }
-    
+
     // For purchase and withdrawal, check balance and limits
-    if (type === 'purchase' || type === 'withdrawal') {
+    if (type === "purchase" || type === "withdrawal") {
       // Check card balance
       if (card.balance < amount) {
-        throw new ApiError('Insufficient card balance', 400, 'insufficient_funds');
+        throw new ApiError(
+          "Insufficient card balance",
+          400,
+          "insufficient_funds",
+        );
       }
-      
+
       // Check daily limit
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      
+
       const todayTransactions = await Transaction.find({
         cardId: id,
         user: userId,
-        type: { $in: ['purchase', 'withdrawal'] },
-        createdAt: { $gte: today }
+        type: { $in: ["purchase", "withdrawal"] },
+        createdAt: { $gte: today },
       });
-      
-      const todaySpent = todayTransactions.reduce((total, tx) => total + tx.amount, 0);
-      
+
+      const todaySpent = todayTransactions.reduce(
+        (total, tx) => total + tx.amount,
+        0,
+      );
+
       if (todaySpent + amount > card.limits.daily) {
-        throw new ApiError('Transaction exceeds daily limit', 400, 'limit_exceeded');
+        throw new ApiError(
+          "Transaction exceeds daily limit",
+          400,
+          "limit_exceeded",
+        );
       }
-      
+
       // Check monthly limit
       const firstDayOfMonth = new Date();
       firstDayOfMonth.setDate(1);
       firstDayOfMonth.setHours(0, 0, 0, 0);
-      
+
       const monthTransactions = await Transaction.find({
         cardId: id,
         user: userId,
-        type: { $in: ['purchase', 'withdrawal'] },
-        createdAt: { $gte: firstDayOfMonth }
+        type: { $in: ["purchase", "withdrawal"] },
+        createdAt: { $gte: firstDayOfMonth },
       });
-      
-      const monthSpent = monthTransactions.reduce((total, tx) => total + tx.amount, 0);
-      
+
+      const monthSpent = monthTransactions.reduce(
+        (total, tx) => total + tx.amount,
+        0,
+      );
+
       if (monthSpent + amount > card.limits.monthly) {
-        throw new ApiError('Transaction exceeds monthly limit', 400, 'limit_exceeded');
+        throw new ApiError(
+          "Transaction exceeds monthly limit",
+          400,
+          "limit_exceeded",
+        );
       }
     }
-    
+
     // Create transaction
     const transaction = new Transaction({
       transactionId: uuidv4(),
@@ -494,40 +576,40 @@ export const createCardTransaction = async (req, res, next) => {
       amount,
       merchantName,
       merchantId: merchantId || `merchant_${Date.now()}`,
-      category: category || 'other',
+      category: category || "other",
       type,
       description: description || `${type} at ${merchantName}`,
-      status: 'completed',
-      currency: card.currency || 'USD',
-      date: new Date()
+      status: "completed",
+      currency: card.currency || "USD",
+      date: new Date(),
     });
-    
+
     await transaction.save();
-    
+
     // Update card balance for purchase/withdrawal
-    if (type === 'purchase' || type === 'withdrawal') {
+    if (type === "purchase" || type === "withdrawal") {
       card.balance -= amount;
-      
+
       // Update daily and monthly usage
       card.limits.dailyUsed = (card.limits.dailyUsed || 0) + amount;
       card.limits.monthlyUsed = (card.limits.monthlyUsed || 0) + amount;
-      
+
       await card.save();
-      
+
       // Update user's main balance as well
       const user = await User.findById(userId);
       if (user) {
         user.balance -= amount;
         await user.save();
       }
-    } 
+    }
     // Handle refunds/deposits
-    else if (type === 'refund' || type === 'deposit') {
+    else if (type === "refund" || type === "deposit") {
       card.balance += amount;
       await card.save();
-      
+
       // Update user's main balance for deposits
-      if (type === 'deposit') {
+      if (type === "deposit") {
         const user = await User.findById(userId);
         if (user) {
           user.balance += amount;
@@ -535,14 +617,17 @@ export const createCardTransaction = async (req, res, next) => {
         }
       }
     }
-    
+
     res.status(201).json({
       success: true,
       message: `Card transaction created successfully`,
-      transaction
+      transaction,
     });
   } catch (error) {
-    logger.error(`Error creating card transaction for card ${req.params.id}:`, error);
+    logger.error(
+      `Error creating card transaction for card ${req.params.id}:`,
+      error,
+    );
     next(error);
   }
 };
@@ -552,73 +637,81 @@ export const fundCardFromBalance = async (req, res, next) => {
     const { id } = req.params;
     const userId = req.user._id;
     const { amount } = req.body;
-    
+
     if (!amount || amount <= 0) {
-      throw new ApiError('Valid amount is required', 400, 'validation_error');
+      throw new ApiError("Valid amount is required", 400, "validation_error");
     }
-    
+
     const card = await ATMCard.findOne({ _id: id, user: userId });
-    
+
     if (!card) {
-      throw new ApiError('Card not found', 404, 'not_found');
+      throw new ApiError("Card not found", 404, "not_found");
     }
-    
+
     // Check card status
-    if (card.status !== 'active') {
-      throw new ApiError(`Cannot fund card in ${card.status} status`, 400, 'invalid_card_status');
+    if (card.status !== "active") {
+      throw new ApiError(
+        `Cannot fund card in ${card.status} status`,
+        400,
+        "invalid_card_status",
+      );
     }
-    
+
     // Find user and check balance
     const user = await User.findById(userId);
-    
+
     if (!user) {
-      throw new ApiError('User not found', 404, 'not_found');
+      throw new ApiError("User not found", 404, "not_found");
     }
-    
+
     if (user.balance < amount) {
-      throw new ApiError('Insufficient balance in your account', 400, 'insufficient_funds');
+      throw new ApiError(
+        "Insufficient balance in your account",
+        400,
+        "insufficient_funds",
+      );
     }
-    
+
     // Create transaction to record the funding
     const transaction = new Transaction({
       transactionId: uuidv4(),
       user: userId,
       cardId: id,
       amount: amount,
-      merchantName: 'FFB Self-Funding',
+      merchantName: "FFB Self-Funding",
       merchantId: `ffb_fund_${Date.now()}`,
-      category: 'transfer',
-      type: 'deposit',
-      description: 'Card funding from account balance',
-      status: 'completed',
-      currency: card.currency || 'USD',
-      date: new Date()
+      category: "transfer",
+      type: "deposit",
+      description: "Card funding from account balance",
+      status: "completed",
+      currency: card.currency || "USD",
+      date: new Date(),
     });
-    
+
     await transaction.save();
-    
+
     // Update card balance
     card.balance += amount;
     await card.save();
-    
+
     // Update user's main balance using findByIdAndUpdate to avoid validation
     const updatedUser = await User.findByIdAndUpdate(
       userId,
       { $inc: { balance: -amount } },
-      { new: true }
+      { new: true },
     );
-    
+
     res.status(200).json({
       success: true,
-      message: 'Card funded successfully',
+      message: "Card funded successfully",
       data: {
         card: {
           id: card._id,
-          balance: card.balance
+          balance: card.balance,
         },
         transaction: transaction,
-        userBalance: updatedUser.balance
-      }
+        userBalance: updatedUser.balance,
+      },
     });
   } catch (error) {
     logger.error(`Error funding card ${req.params.id}:`, error);
@@ -632,35 +725,43 @@ export const updateCardDesign = async (req, res, next) => {
     const userId = req.user._id;
     const { cardId } = req.params;
     const { primaryColor, secondaryColor } = req.body;
-    
+
     // Validate at least one color is provided
     if (!primaryColor && !secondaryColor) {
-      throw new ApiError('At least one color must be provided', 400, 'validation_error');
+      throw new ApiError(
+        "At least one color must be provided",
+        400,
+        "validation_error",
+      );
     }
-    
+
     // Find the card and ensure it belongs to the user
     const card = await ATMCard.findOne({ _id: cardId, user: userId });
-    
+
     if (!card) {
-      throw new ApiError('Card not found or you do not have permission to update this card', 404, 'not_found');
+      throw new ApiError(
+        "Card not found or you do not have permission to update this card",
+        404,
+        "not_found",
+      );
     }
-    
+
     // Update card design
     card.cardDesign = {
       primaryColor: primaryColor || card.cardDesign?.primaryColor || null,
       secondaryColor: secondaryColor || card.cardDesign?.secondaryColor || null,
-      useCustomColors: true
+      useCustomColors: true,
     };
-    
+
     await card.save();
-    
+
     res.status(200).json({
       success: true,
-      message: 'Card design updated successfully',
-      data: card
+      message: "Card design updated successfully",
+      data: card,
     });
   } catch (error) {
-    logger.error('Error updating card design:', error);
+    logger.error("Error updating card design:", error);
     next(error);
   }
 };
@@ -670,35 +771,35 @@ export const updateCardDesign = async (req, res, next) => {
 // Admin: Get all cards
 export const adminGetAllCards = async (req, res, next) => {
   try {
-    if (!['admin', 'superadmin'].includes(req.user.role)) {
-      throw new ApiError('Unauthorized access', 403, 'forbidden');
+    if (!["admin", "superadmin"].includes(req.user.role)) {
+      throw new ApiError("Unauthorized access", 403, "forbidden");
     }
-    
-    const { 
-      status, 
-      cardType, 
-      page = 1, 
+
+    const {
+      status,
+      cardType,
+      page = 1,
       limit = 10,
-      sortBy = 'createdAt',
-      sortOrder = 'desc' 
+      sortBy = "createdAt",
+      sortOrder = "desc",
     } = req.query;
-    
+
     // Build query
     const query = {};
     if (status) query.status = status;
     if (cardType) query.cardType = cardType;
-    
+
     // Build sort
     const sort = {};
-    sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
-    
+    sort[sortBy] = sortOrder === "asc" ? 1 : -1;
+
     const totalCards = await ATMCard.countDocuments(query);
     const cards = await ATMCard.find(query)
-      .populate('user', 'email firstName lastName')
+      .populate("user", "email firstName lastName")
       .sort(sort)
       .skip((parseInt(page) - 1) * parseInt(limit))
       .limit(parseInt(limit));
-    
+
     res.status(200).json({
       success: true,
       data: {
@@ -707,12 +808,12 @@ export const adminGetAllCards = async (req, res, next) => {
           total: totalCards,
           page: parseInt(page),
           limit: parseInt(limit),
-          pages: Math.ceil(totalCards / parseInt(limit))
-        }
-      }
+          pages: Math.ceil(totalCards / parseInt(limit)),
+        },
+      },
     });
   } catch (error) {
-    logger.error('Error fetching all cards (admin):', error);
+    logger.error("Error fetching all cards (admin):", error);
     next(error);
   }
 };
@@ -721,22 +822,24 @@ export const adminGetAllCards = async (req, res, next) => {
 export const adminGetCardById = async (req, res, next) => {
   try {
     // Check admin permissions
-    if (!['admin', 'superadmin'].includes(req.user.role)) {
-      throw new ApiError('Unauthorized access', 403, 'forbidden');
+    if (!["admin", "superadmin"].includes(req.user.role)) {
+      throw new ApiError("Unauthorized access", 403, "forbidden");
     }
-    
+
     const { id } = req.params;
-    
-    const card = await ATMCard.findById(id)
-      .populate('user', 'email firstName lastName');
-    
+
+    const card = await ATMCard.findById(id).populate(
+      "user",
+      "email firstName lastName",
+    );
+
     if (!card) {
-      throw new ApiError('Card not found', 404, 'not_found');
+      throw new ApiError("Card not found", 404, "not_found");
     }
-    
+
     res.status(200).json({
       success: true,
-      data: card
+      data: card,
     });
   } catch (error) {
     logger.error(`Error fetching card ${req.params.id} (admin):`, error);
@@ -748,51 +851,59 @@ export const adminGetCardById = async (req, res, next) => {
 export const adminApproveCardRequest = async (req, res, next) => {
   try {
     // Check admin permissions
-    if (!['admin', 'superadmin'].includes(req.user.role)) {
-      throw new ApiError('Unauthorized access', 403, 'forbidden');
+    if (!["admin", "superadmin"].includes(req.user.role)) {
+      throw new ApiError("Unauthorized access", 403, "forbidden");
     }
-    
+
     const { id } = req.params;
-    
+
     const card = await ATMCard.findById(id);
-    
+
     if (!card) {
-      throw new ApiError('Card not found', 404, 'not_found');
+      throw new ApiError("Card not found", 404, "not_found");
     }
-    
-    if (card.status !== 'pending') {
-      throw new ApiError(`Cannot approve card in ${card.status} status`, 400, 'invalid_status');
+
+    if (card.status !== "pending") {
+      throw new ApiError(
+        `Cannot approve card in ${card.status} status`,
+        400,
+        "invalid_status",
+      );
     }
-    
+
     // Generate card details
     const cardNumber = generateCardNumber();
     const expiryDate = getExpiryDate();
     const cvv = generateCVV();
-    
+
     // Update card with details
-    card.status = 'active';
+    card.status = "active";
     card.cardNumber = cardNumber;
     card.expiryDate = expiryDate;
     card.cvv = cvv;
     card.approvedBy = req.user._id;
     card.approvedAt = new Date();
-    
-    if (card.cardType === 'physical') {
-      card.status = 'processing'; // Physical cards need to be issued
-      card.processingMessage = 'Your card has been approved and is being processed for shipping';
+
+    if (card.cardType === "physical") {
+      card.status = "processing"; // Physical cards need to be issued
+      card.processingMessage =
+        "Your card has been approved and is being processed for shipping";
     }
-    
+
     await card.save();
-    
+
     // TODO: Send notification to user
-    
+
     res.status(200).json({
       success: true,
       message: `Card request approved successfully. Card is now ${card.status}.`,
-      data: card
+      data: card,
     });
   } catch (error) {
-    logger.error(`Error approving card request ${req.params.id} (admin):`, error);
+    logger.error(
+      `Error approving card request ${req.params.id} (admin):`,
+      error,
+    );
     next(error);
   }
 };
@@ -801,44 +912,55 @@ export const adminApproveCardRequest = async (req, res, next) => {
 export const adminRejectCardRequest = async (req, res, next) => {
   try {
     // Check admin permissions
-    if (!['admin', 'superadmin'].includes(req.user.role)) {
-      throw new ApiError('Unauthorized access', 403, 'forbidden');
+    if (!["admin", "superadmin"].includes(req.user.role)) {
+      throw new ApiError("Unauthorized access", 403, "forbidden");
     }
-    
+
     const { id } = req.params;
     const { reason } = req.body;
-    
+
     if (!reason) {
-      throw new ApiError('Rejection reason is required', 400, 'validation_error');
+      throw new ApiError(
+        "Rejection reason is required",
+        400,
+        "validation_error",
+      );
     }
-    
+
     const card = await ATMCard.findById(id);
-    
+
     if (!card) {
-      throw new ApiError('Card not found', 404, 'not_found');
+      throw new ApiError("Card not found", 404, "not_found");
     }
-    
-    if (card.status !== 'pending') {
-      throw new ApiError(`Cannot reject card in ${card.status} status`, 400, 'invalid_status');
+
+    if (card.status !== "pending") {
+      throw new ApiError(
+        `Cannot reject card in ${card.status} status`,
+        400,
+        "invalid_status",
+      );
     }
-    
+
     // Update card status
-    card.status = 'rejected';
+    card.status = "rejected";
     card.rejectionReason = reason;
     card.processedBy = req.user._id;
     card.processedAt = new Date();
-    
+
     await card.save();
-    
+
     // TODO: Send notification to user
-    
+
     res.status(200).json({
       success: true,
-      message: 'Card request rejected successfully',
-      data: card
+      message: "Card request rejected successfully",
+      data: card,
     });
   } catch (error) {
-    logger.error(`Error rejecting card request ${req.params.id} (admin):`, error);
+    logger.error(
+      `Error rejecting card request ${req.params.id} (admin):`,
+      error,
+    );
     next(error);
   }
 };
@@ -847,47 +969,59 @@ export const adminRejectCardRequest = async (req, res, next) => {
 export const adminUpdateCardStatus = async (req, res, next) => {
   try {
     // Check admin permissions
-    if (!['admin', 'superadmin'].includes(req.user.role)) {
-      throw new ApiError('Unauthorized access', 403, 'forbidden');
+    if (!["admin", "superadmin"].includes(req.user.role)) {
+      throw new ApiError("Unauthorized access", 403, "forbidden");
     }
-    
+
     const { id } = req.params;
     const { status, notes } = req.body;
-    
+
     if (!status) {
-      throw new ApiError('Status is required', 400, 'validation_error');
+      throw new ApiError("Status is required", 400, "validation_error");
     }
-    
-    const validStatuses = ['active', 'frozen', 'suspended', 'cancelled', 'expired', 'processing', 'shipped'];
+
+    const validStatuses = [
+      "active",
+      "frozen",
+      "suspended",
+      "cancelled",
+      "expired",
+      "processing",
+      "shipped",
+    ];
     if (!validStatuses.includes(status)) {
-      throw new ApiError(`Invalid status. Must be one of: ${validStatuses.join(', ')}`, 400, 'validation_error');
+      throw new ApiError(
+        `Invalid status. Must be one of: ${validStatuses.join(", ")}`,
+        400,
+        "validation_error",
+      );
     }
-    
+
     const card = await ATMCard.findById(id);
-    
+
     if (!card) {
-      throw new ApiError('Card not found', 404, 'not_found');
+      throw new ApiError("Card not found", 404, "not_found");
     }
-    
+
     // Update card status
     card.status = status;
-    
+
     if (notes) {
       card.adminNotes = notes;
     }
-    
-    if (status === 'shipped') {
+
+    if (status === "shipped") {
       card.shippedAt = new Date();
     }
-    
+
     await card.save();
-    
+
     // TODO: Send notification to user
-    
+
     res.status(200).json({
       success: true,
       message: `Card status updated to ${status} successfully`,
-      data: card
+      data: card,
     });
   } catch (error) {
     logger.error(`Error updating card status ${req.params.id} (admin):`, error);
@@ -909,11 +1043,11 @@ export default {
   createCardTransaction,
   fundCardFromBalance,
   updateCardDesign,
-  
+
   // Admin methods
   adminGetAllCards,
   adminGetCardById,
   adminApproveCardRequest,
   adminRejectCardRequest,
-  adminUpdateCardStatus
+  adminUpdateCardStatus,
 };

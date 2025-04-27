@@ -1,89 +1,89 @@
-import mongoose from 'mongoose';
+import mongoose from "mongoose";
 
 const kycRequestSchema = new mongoose.Schema(
   {
     user: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true
+      ref: "User",
+      required: true,
     },
     status: {
       type: String,
-      enum: ['pending', 'approved', 'rejected'],
-      default: 'pending'
+      enum: ["pending", "approved", "rejected"],
+      default: "pending",
     },
     documentType: {
       type: String,
-      enum: ['passport', 'national_id', 'drivers_license'],
-      required: true
+      enum: ["passport", "national_id", "drivers_license"],
+      required: true,
     },
     documentNumber: {
       type: String,
-      required: true
+      required: true,
     },
     frontImage: {
       type: String, // URL to stored image
-      required: true
+      required: true,
     },
     backImage: {
       type: String, // URL to stored image
-      default: null
+      default: null,
     },
     selfieImage: {
       type: String, // URL to stored selfie with ID
-      required: true
+      required: true,
     },
     proofOfAddressImage: {
       type: String, // URL to stored proof of address
-      required: true
+      required: true,
     },
     proofOfAddressType: {
       type: String,
-      enum: ['utility_bill', 'bank_statement', 'government_letter'],
-      required: true
+      enum: ["utility_bill", "bank_statement", "government_letter"],
+      required: true,
     },
     countryOfIssue: {
       type: String,
-      required: true
+      required: true,
     },
     dateOfBirth: {
       type: Date,
-      required: true
+      required: true,
     },
     address: {
       street: { type: String, required: true },
       city: { type: String, required: true },
       state: { type: String, required: true },
       postalCode: { type: String, required: true },
-      country: { type: String, required: true }
+      country: { type: String, required: true },
     },
     rejectionReason: {
       type: String,
-      default: null
+      default: null,
     },
     adminNotes: {
       type: String,
-      default: null
+      default: null,
     },
     processedBy: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      default: null
+      ref: "User",
+      default: null,
     },
     processedAt: {
       type: Date,
-      default: null
-    }
+      default: null,
+    },
   },
   {
-    timestamps: true
-  }
+    timestamps: true,
+  },
 );
 
 // Add index for faster queries
 kycRequestSchema.index({ user: 1, status: 1 });
 kycRequestSchema.index({ createdAt: -1 });
 
-const KycRequest = mongoose.model('KycRequest', kycRequestSchema);
+const KycRequest = mongoose.model("KycRequest", kycRequestSchema);
 
 export default KycRequest;

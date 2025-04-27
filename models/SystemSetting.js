@@ -1,4 +1,4 @@
-import mongoose from 'mongoose';
+import mongoose from "mongoose";
 
 const systemSettingSchema = new mongoose.Schema(
   {
@@ -6,52 +6,62 @@ const systemSettingSchema = new mongoose.Schema(
       type: String,
       required: true,
       unique: true,
-      trim: true
+      trim: true,
     },
     value: {
       type: mongoose.Schema.Types.Mixed,
-      required: true
+      required: true,
     },
     description: {
       type: String,
-      required: true
+      required: true,
     },
     category: {
       type: String,
       required: true,
-      enum: ['general', 'security', 'email', 'payment', 'kyc', 'trading', 'ui', 'notifications', 'advanced']
+      enum: [
+        "general",
+        "security",
+        "email",
+        "payment",
+        "kyc",
+        "trading",
+        "ui",
+        "notifications",
+        "advanced",
+      ],
     },
     type: {
       type: String,
       required: true,
-      enum: ['string', 'number', 'boolean', 'json', 'select', 'array']
+      enum: ["string", "number", "boolean", "json", "select", "array"],
     },
     options: {
       type: [mongoose.Schema.Types.Mixed],
-      default: []
+      default: [],
     },
     sensitive: {
       type: Boolean,
-      default: false
+      default: false,
     },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
+      ref: "User",
     },
     updatedBy: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
-    }
+      ref: "User",
+    },
   },
   {
-    timestamps: true
-  }
+    timestamps: true,
+  },
 );
 
 // Add indexes for faster queries
 systemSettingSchema.index({ category: 1 });
 systemSettingSchema.index({ sensitive: 1 });
 
-const SystemSetting = mongoose.model('SystemSetting', systemSettingSchema);
+const SystemSetting = mongoose.model("SystemSetting", systemSettingSchema);
 
 export default SystemSetting;

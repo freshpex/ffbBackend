@@ -1,4 +1,4 @@
-import winston from 'winston';
+import winston from "winston";
 
 // Define log levels
 const levels = {
@@ -11,30 +11,30 @@ const levels = {
 
 // Create format
 const format = winston.format.combine(
-  winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+  winston.format.timestamp({ format: "YYYY-MM-DD HH:mm:ss" }),
   winston.format.printf(({ timestamp, level, message, ...meta }) => {
     return `${timestamp} ${level.toUpperCase()}: ${message} ${
-      Object.keys(meta).length ? JSON.stringify(meta, null, 2) : ''
+      Object.keys(meta).length ? JSON.stringify(meta, null, 2) : ""
     }`;
-  })
+  }),
 );
 
 // Console transport
 const consoleTransport = new winston.transports.Console({
-  level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
+  level: process.env.NODE_ENV === "production" ? "info" : "debug",
   format: winston.format.combine(
     winston.format.colorize({ all: true }),
     winston.format.printf(({ timestamp, level, message, ...meta }) => {
       return `${timestamp} ${level}: ${message} ${
-        Object.keys(meta).length ? JSON.stringify(meta, null, 2) : ''
+        Object.keys(meta).length ? JSON.stringify(meta, null, 2) : ""
       }`;
-    })
+    }),
   ),
 });
 
 // Create logger instance
 const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL || 'info',
+  level: process.env.LOG_LEVEL || "info",
   levels,
   format,
   transports: [consoleTransport],
@@ -57,19 +57,20 @@ const safeStringify = (obj, replacer = null, spaces = 2) => {
       if (value instanceof Error) {
         return {
           message: value.message,
-          stack: process.env.NODE_ENV === 'production' ? undefined : value.stack,
+          stack:
+            process.env.NODE_ENV === "production" ? undefined : value.stack,
         };
       }
-      
-      if (typeof value === 'object' && value !== null) {
+
+      if (typeof value === "object" && value !== null) {
         if (seen.has(value)) {
-          return '[Circular]';
+          return "[Circular]";
         }
         seen.add(value);
       }
       return replacer ? replacer(key, value) : value;
     },
-    spaces
+    spaces,
   );
 };
 
@@ -78,22 +79,24 @@ export const requestLogger = (req, res, next) => {
   const start = Date.now();
   const requestId = Math.random().toString(36).substring(2, 15);
   req.requestId = requestId;
-  
-  if (process.env.NODE_ENV !== 'production') {
+
+  if (process.env.NODE_ENV !== "production") {
     logger.info(`Request [${requestId}]: ${req.method} ${req.originalUrl}`);
   }
-  
-  res.on('finish', () => {
+
+  res.on("finish", () => {
     const duration = Date.now() - start;
-    
+
     if (res.statusCode >= 400) {
-      const logLevel = res.statusCode >= 500 ? 'error' : 'warn';
-      logger[logLevel](`Response [${requestId}]: ${res.statusCode} ${req.method} ${req.originalUrl} - ${duration}ms`);
-    } else if (process.env.NODE_ENV !== 'production') {
+      const logLevel = res.statusCode >= 500 ? "error" : "warn";
+      logger[logLevel](
+        `Response [${requestId}]: ${res.statusCode} ${req.method} ${req.originalUrl} - ${duration}ms`,
+      );
+    } else if (process.env.NODE_ENV !== "production") {
       logger.info(`Response [${requestId}]: ${res.statusCode} - ${duration}ms`);
     }
   });
-  
+
   next();
 };
 
@@ -103,12 +106,12 @@ export const errorLogger = (err, req, res, next) => {
     message: err.message,
     name: err.name,
     status: err.status || err.statusCode,
-    stack: process.env.NODE_ENV === 'production' ? undefined : err.stack,
+    stack: process.env.NODE_ENV === "production" ? undefined : err.stack,
     path: req.originalUrl,
-    method: req.method
+    method: req.method,
   };
-  
-  logger.error('Error', safeError);
+
+  logger.error("Error", safeError);
   next(err);
 };
 

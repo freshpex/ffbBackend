@@ -1,11 +1,11 @@
-import axios from 'axios';
-import logger from '../middleware/logger.js';
+import axios from "axios";
+import logger from "../middleware/logger.js";
 
 // Circuit breaker states
 const CB_STATES = {
-  CLOSED: 'closed',
-  OPEN: 'open',
-  HALF_OPEN: 'half-open'
+  CLOSED: "closed",
+  OPEN: "open",
+  HALF_OPEN: "half-open",
 };
 
 // Circuit breaker configuration
@@ -21,7 +21,7 @@ function getCircuitBreaker(serviceId) {
       failureThreshold: 5,
       successThreshold: 2,
       resetTimeoutMs: 30000,
-      resetTimeout: null
+      resetTimeout: null,
     });
   }
   return circuitBreakers.get(serviceId);
@@ -32,10 +32,10 @@ function registerFailure(serviceId, error) {
   cb.failureCount++;
   cb.lastFailure = Date.now();
   cb.successCount = 0;
-  
+
   if (cb.state === CB_STATES.CLOSED && cb.failureCount >= cb.failureThreshold) {
     cb.state = CB_STATES.OPEN;
-    
+
     cb.resetTimeout = setTimeout(() => {
       cb.state = CB_STATES.HALF_OPEN;
     }, cb.resetTimeoutMs);
@@ -44,7 +44,7 @@ function registerFailure(serviceId, error) {
 
 function registerSuccess(serviceId) {
   const cb = getCircuitBreaker(serviceId);
-  
+
   if (cb.state === CB_STATES.HALF_OPEN) {
     cb.successCount++;
     if (cb.successCount >= cb.successThreshold) {
@@ -56,22 +56,26 @@ function registerSuccess(serviceId) {
   }
 }
 
-export async function callWithRetry(apiCall, options = {}, serviceId = 'default') {
-  const { 
-    retries = 3, 
-    retryDelay = 1000, 
+export async function callWithRetry(
+  apiCall,
+  options = {},
+  serviceId = "default",
+) {
+  const {
+    retries = 3,
+    retryDelay = 1000,
     shouldRetry = (error) => true,
-    onRetry = null
+    onRetry = null,
   } = options;
-  
+
   const cb = getCircuitBreaker(serviceId);
-  
+
   if (cb.state === CB_STATES.OPEN) {
     throw new Error(`Service ${serviceId} is unavailable (circuit open)`);
   }
-  
+
   let lastError;
-  
+
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const response = await apiCall();
@@ -79,20 +83,22 @@ export async function callWithRetry(apiCall, options = {}, serviceId = 'default'
       return response;
     } catch (error) {
       lastError = error;
-      
+
       if (attempt === retries || !shouldRetry(error)) {
         registerFailure(serviceId, error);
         throw error;
       }
-      
+
       if (onRetry) {
         onRetry(error, attempt);
       }
-      
-      await new Promise(resolve => setTimeout(resolve, retryDelay * Math.pow(2, attempt)));
+
+      await new Promise((resolve) =>
+        setTimeout(resolve, retryDelay * Math.pow(2, attempt)),
+      );
     }
   }
-  
+
   throw lastError;
 }
 
@@ -101,11 +107,11 @@ export function createAPIClient(baseURL, options = {}) {
     baseURL,
     timeout: options.timeout || 10000,
     headers: {
-      'Content-Type': 'application/json',
-      ...options.headers
-    }
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
   });
-  
+
   return client;
 }
 

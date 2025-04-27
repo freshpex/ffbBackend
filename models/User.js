@@ -1,227 +1,234 @@
-import mongoose from 'mongoose';
-import bcrypt from 'bcrypt';
-import crypto from 'crypto';
+import mongoose from "mongoose";
+import bcrypt from "bcrypt";
+import crypto from "crypto";
 
 const apiKeySchema = new mongoose.Schema({
   key: {
     type: String,
-    required: true
+    required: true,
   },
   secret: {
     type: String,
-    required: true
+    required: true,
   },
   name: {
     type: String,
-    required: true
+    required: true,
   },
   active: {
     type: Boolean,
-    default: true
+    default: true,
   },
-  permissions: [{
-    type: String,
-    enum: ['read', 'trade', 'withdraw']
-  }],
-  allowedIPs: [{
-    type: String
-  }],
+  permissions: [
+    {
+      type: String,
+      enum: ["read", "trade", "withdraw"],
+    },
+  ],
+  allowedIPs: [
+    {
+      type: String,
+    },
+  ],
   createdAt: {
     type: Date,
-    default: Date.now
+    default: Date.now,
   },
   lastUsed: {
-    type: Date
-  }
+    type: Date,
+  },
 });
 
 const kycDocumentSchema = new mongoose.Schema({
   url: {
     type: String,
-    required: function() {
+    required: function () {
       // Only require if parent object is present and verified is true
       return this.parent().verified === true;
     },
-    default: 'pending'
+    default: "pending",
   },
   verified: {
     type: Boolean,
-    default: false
+    default: false,
   },
   uploadedAt: {
     type: Date,
-    default: Date.now
-  }
+    default: Date.now,
+  },
 });
 
-const userSchema = new mongoose.Schema({
-  uid: {
-    type: String,
-    unique: true,
-    sparse: true
-  },
-  email: {
-    type: String,
-    required: true,
-    unique: true,
-    trim: true,
-    lowercase: true
-  },
-  password: {
-    type: String,
-    required: function() {
-      return this.authMethod === 'local' || !this.authMethod;
-    }
-  },
-  firstName: {
-    type: String,
-    trim: true
-  },
-  lastName: {
-    type: String,
-    trim: true
-  },
-  role: {
-    type: String,
-    enum: ['user', 'admin', 'superadmin'],
-    default: 'user'
-  },
-  status: {
-    type: String,
-    enum: ['active', 'inactive', 'suspended'],
-    default: 'active'
-  },
-  balance: {
-    type: Number,
-    default: 0
-  },
-  kycVerified: {
-    type: Boolean,
-    default: false
-  },
-  kycStatus: {
-    type: String,
-    enum: ['pending', 'approved', 'rejected', 'not_submitted'],
-    default: 'not_submitted'
-  },
-  kycNotes: {
-    type: String
-  },
-  kycVerifiedAt: {
-    type: Date
-  },
-  kycVerifiedBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
-  },
-  kycDocuments: {
-    idCard: kycDocumentSchema,
-    proofOfAddress: kycDocumentSchema
-  },
-  phone: {
-    type: String
-  },
-  phoneNumber: {
-    type: String
-  },
-  country: {
-    type: String
-  },
-  dateOfBirth: {
-    type: Date
-  },
-  occupation: {
-    type: String
-  },
-  accountType: {
-    type: String,
-    enum: ['individual', 'corporate', 'joint', 'retirement'],
-    default: 'individual'
-  },
-  address: {
-    street: {
-      type: String
+const userSchema = new mongoose.Schema(
+  {
+    uid: {
+      type: String,
+      unique: true,
+      sparse: true,
     },
-    city: {
-      type: String
+    email: {
+      type: String,
+      required: true,
+      unique: true,
+      trim: true,
+      lowercase: true,
     },
-    postalCode: {
-      type: String
+    password: {
+      type: String,
+      required: function () {
+        return this.authMethod === "local" || !this.authMethod;
+      },
+    },
+    firstName: {
+      type: String,
+      trim: true,
+    },
+    lastName: {
+      type: String,
+      trim: true,
+    },
+    role: {
+      type: String,
+      enum: ["user", "admin", "superadmin"],
+      default: "user",
+    },
+    status: {
+      type: String,
+      enum: ["active", "inactive", "suspended"],
+      default: "active",
+    },
+    balance: {
+      type: Number,
+      default: 0,
+    },
+    kycVerified: {
+      type: Boolean,
+      default: false,
+    },
+    kycStatus: {
+      type: String,
+      enum: ["pending", "approved", "rejected", "not_submitted"],
+      default: "not_submitted",
+    },
+    kycNotes: {
+      type: String,
+    },
+    kycVerifiedAt: {
+      type: Date,
+    },
+    kycVerifiedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    kycDocuments: {
+      idCard: kycDocumentSchema,
+      proofOfAddress: kycDocumentSchema,
+    },
+    phone: {
+      type: String,
+    },
+    phoneNumber: {
+      type: String,
     },
     country: {
-      type: String
-    }
-  },
-  taxId: {
-    type: String
-  },
-  experienceLevel: {
-    type: String,
-    enum: ['beginner', 'intermediate', 'advanced', 'professional'],
-    default: 'beginner'
-  },
-  howDidYouHearAboutUs: {
-    type: String
-  },
-  tradingEnabled: {
-    type: Boolean,
-    default: true
-  },
-  referralCode: {
-    type: String,
-    unique: true,
-    sparse: true
-  },
-  referredBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
-  },
-  loginAttempts: {
-    type: Number,
-    default: 0
-  },
-  lastLoginAt: {
-    type: Date
-  },
-  passwordResetToken: String,
-  passwordResetExpires: Date,
-  apiKeys: [apiKeySchema],
-  settings: {
-    theme: {
       type: String,
-      default: 'light'
     },
-    notifications: {
-      email: {
-        type: Boolean,
-        default: true
+    dateOfBirth: {
+      type: Date,
+    },
+    occupation: {
+      type: String,
+    },
+    accountType: {
+      type: String,
+      enum: ["individual", "corporate", "joint", "retirement"],
+      default: "individual",
+    },
+    address: {
+      street: {
+        type: String,
       },
-      app: {
-        type: Boolean,
-        default: true
-      }
+      city: {
+        type: String,
+      },
+      postalCode: {
+        type: String,
+      },
+      country: {
+        type: String,
+      },
     },
-    twoFactorEnabled: {
+    taxId: {
+      type: String,
+    },
+    experienceLevel: {
+      type: String,
+      enum: ["beginner", "intermediate", "advanced", "professional"],
+      default: "beginner",
+    },
+    howDidYouHearAboutUs: {
+      type: String,
+    },
+    tradingEnabled: {
       type: Boolean,
-      default: false
-    }
+      default: true,
+    },
+    referralCode: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
+    referredBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    loginAttempts: {
+      type: Number,
+      default: 0,
+    },
+    lastLoginAt: {
+      type: Date,
+    },
+    passwordResetToken: String,
+    passwordResetExpires: Date,
+    apiKeys: [apiKeySchema],
+    settings: {
+      theme: {
+        type: String,
+        default: "light",
+      },
+      notifications: {
+        email: {
+          type: Boolean,
+          default: true,
+        },
+        app: {
+          type: Boolean,
+          default: true,
+        },
+      },
+      twoFactorEnabled: {
+        type: Boolean,
+        default: false,
+      },
+    },
+    authMethod: {
+      type: String,
+      enum: ["local", "google", "facebook"],
+      default: "local",
+    },
   },
-  authMethod: {
-    type: String,
-    enum: ['local', 'google', 'facebook'],
-    default: 'local'
-  }
-}, {
-  timestamps: true
-});
+  {
+    timestamps: true,
+  },
+);
 
 // Hash password before saving
-userSchema.pre('save', async function(next) {
+userSchema.pre("save", async function (next) {
   const user = this;
-  
+
   // Only hash if password is modified or new
-  if (!user.isModified('password')) return next();
-  
+  if (!user.isModified("password")) return next();
+
   try {
     const salt = await bcrypt.genSalt(10);
     user.password = await bcrypt.hash(user.password, salt);
@@ -232,55 +239,55 @@ userSchema.pre('save', async function(next) {
 });
 
 // Generate referral code if not set
-userSchema.pre('save', function(next) {
+userSchema.pre("save", function (next) {
   const user = this;
-  
+
   if (!user.referralCode) {
     // Generate a unique code based on user ID and timestamp
     const baseCode = user._id.toString().slice(-6).toUpperCase();
     user.referralCode = `${baseCode}${Math.floor(Math.random() * 1000)}`;
   }
-  
+
   next();
 });
 
 // Compare password method
-userSchema.methods.comparePassword = async function(candidatePassword) {
+userSchema.methods.comparePassword = async function (candidatePassword) {
   return bcrypt.compare(candidatePassword, this.password);
 };
 
 // Generate API key pair
-userSchema.methods.generateApiKey = function(name, permissions = ['read']) {
-  const key = crypto.randomBytes(16).toString('hex');
-  const secret = crypto.randomBytes(32).toString('hex');
-  
+userSchema.methods.generateApiKey = function (name, permissions = ["read"]) {
+  const key = crypto.randomBytes(16).toString("hex");
+  const secret = crypto.randomBytes(32).toString("hex");
+
   this.apiKeys.push({
     key,
     secret,
     name,
     permissions,
     active: true,
-    createdAt: new Date()
+    createdAt: new Date(),
   });
-  
+
   return { key, secret };
 };
 
 // Generate password reset token
-userSchema.methods.createPasswordResetToken = function() {
-  const resetToken = crypto.randomBytes(32).toString('hex');
-  
+userSchema.methods.createPasswordResetToken = function () {
+  const resetToken = crypto.randomBytes(32).toString("hex");
+
   this.passwordResetToken = crypto
-    .createHash('sha256')
+    .createHash("sha256")
     .update(resetToken)
-    .digest('hex');
-  
+    .digest("hex");
+
   // Token expires in 1 hour
   this.passwordResetExpires = Date.now() + 3600000;
-  
+
   return resetToken;
 };
 
-const User = mongoose.model('User', userSchema);
+const User = mongoose.model("User", userSchema);
 
 export default User;

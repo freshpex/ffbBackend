@@ -1,6 +1,6 @@
-import express from 'express';
-import { verifyToken } from '../middleware/auth.js';
-import { asyncHandler } from '../middleware/errorHandler.js';
+import express from "express";
+import { verifyToken } from "../middleware/auth.js";
+import { asyncHandler } from "../middleware/errorHandler.js";
 import {
   getInvestmentPlans,
   getInvestmentPlanById,
@@ -9,8 +9,8 @@ import {
   getInvestmentById,
   getInvestmentStatistics,
   cancelInvestment,
-  withdrawInvestment
-} from '../controllers/InvestmentController.js';
+  withdrawInvestment,
+} from "../controllers/InvestmentController.js";
 
 const router = express.Router();
 
@@ -18,34 +18,34 @@ const router = express.Router();
 router.use(verifyToken);
 
 // Get all investment plans
-router.get('/plans', asyncHandler(getInvestmentPlans));
+router.get("/plans", asyncHandler(getInvestmentPlans));
 
 // Get specific investment plan
-router.get('/plans/:id', asyncHandler(getInvestmentPlanById));
+router.get("/plans/:id", asyncHandler(getInvestmentPlanById));
 
 // Get investment statistics
-router.get('/statistics', asyncHandler(getInvestmentStatistics));
+router.get("/statistics", asyncHandler(getInvestmentStatistics));
 
 // Add the new user statistics endpoint
-router.get('/user/statistics', asyncHandler(getInvestmentStatistics));
+router.get("/user/statistics", asyncHandler(getInvestmentStatistics));
 
 // Get user's investments with specific routes
-router.get('/user-investments', asyncHandler(getUserInvestments));
-router.get('/user', asyncHandler(getUserInvestments));
+router.get("/user-investments", asyncHandler(getUserInvestments));
+router.get("/user", asyncHandler(getUserInvestments));
 
 // Get user's investments (default route)
-router.get('/', asyncHandler(getUserInvestments));
+router.get("/", asyncHandler(getUserInvestments));
 
 // Create a new investment
-router.post('/', asyncHandler(createInvestment));
+router.post("/", asyncHandler(createInvestment));
 
 // Cancel an investment
-router.post('/:id/cancel', asyncHandler(cancelInvestment));
+router.post("/:id/cancel", asyncHandler(cancelInvestment));
 
 // Withdraw an investment early
-router.post('/:id/withdraw', asyncHandler(withdrawInvestment));
+router.post("/:id/withdraw", asyncHandler(withdrawInvestment));
 
 // Get specific investment details
-router.get('/:id', asyncHandler(getInvestmentById));
+router.get("/:id", asyncHandler(getInvestmentById));
 
 export default router;

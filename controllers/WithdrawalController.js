@@ -1,30 +1,30 @@
-import Transaction from '../models/Transaction.js';
-import User from '../models/User.js';
-import mongoose from 'mongoose';
-import logger from '../middleware/logger.js';
-import { ApiError } from '../middleware/errorHandler.js';
+import Transaction from "../models/Transaction.js";
+import User from "../models/User.js";
+import mongoose from "mongoose";
+import logger from "../middleware/logger.js";
+import { ApiError } from "../middleware/errorHandler.js";
 
 // Get all withdrawals for a user
 export const getUserWithdrawals = async (req, res, next) => {
   try {
     const { status, page = 1, limit = 10 } = req.query;
-    
-    const query = { 
+
+    const query = {
       user: req.user._id,
-      type: 'withdrawal'
+      type: "withdrawal",
     };
-    
+
     if (status) {
       query.status = status;
     }
-    
+
     // Execute query with pagination
     const total = await Transaction.countDocuments(query);
     const withdrawals = await Transaction.find(query)
       .sort({ createdAt: -1 })
       .skip((parseInt(page) - 1) * parseInt(limit))
       .limit(parseInt(limit));
-    
+
     res.status(200).json({
       success: true,
       data: {
@@ -33,12 +33,12 @@ export const getUserWithdrawals = async (req, res, next) => {
           total,
           page: parseInt(page),
           limit: parseInt(limit),
-          pages: Math.ceil(total / parseInt(limit))
-        }
-      }
+          pages: Math.ceil(total / parseInt(limit)),
+        },
+      },
     });
   } catch (error) {
-    logger.error('Error fetching user withdrawals:', error);
+    logger.error("Error fetching user withdrawals:", error);
     next(error);
   }
 };
@@ -47,20 +47,20 @@ export const getUserWithdrawals = async (req, res, next) => {
 export const getWithdrawalById = async (req, res, next) => {
   try {
     const { id } = req.params;
-    
+
     const withdrawal = await Transaction.findOne({
       _id: id,
       user: req.user._id,
-      type: 'withdrawal'
+      type: "withdrawal",
     });
-    
+
     if (!withdrawal) {
-      throw new ApiError('Withdrawal not found', 404, 'not_found');
+      throw new ApiError("Withdrawal not found", 404, "not_found");
     }
-    
+
     res.status(200).json({
       success: true,
-      data: withdrawal
+      data: withdrawal,
     });
   } catch (error) {
     logger.error(`Error fetching withdrawal ${req.params.id}:`, error);
@@ -72,66 +72,103 @@ export const getWithdrawalById = async (req, res, next) => {
 export const createWithdrawal = async (req, res, next) => {
   const session = await mongoose.startSession();
   session.startTransaction();
-  
+
   try {
-    const { amount, method, currency = 'USD', walletAddress, bankDetails, paypalEmail, cryptoType, description } = req.body;
-    
+    const {
+      amount,
+      method,
+      currency = "USD",
+      walletAddress,
+      bankDetails,
+      paypalEmail,
+      cryptoType,
+      description,
+    } = req.body;
+
     // Validate amount
     if (!amount || isNaN(amount) || amount <= 0) {
-      throw new ApiError('Valid withdrawal amount is required', 400, 'validation_error');
+      throw new ApiError(
+        "Valid withdrawal amount is required",
+        400,
+        "validation_error",
+      );
     }
-    
+
     // Validate method
     if (!method) {
-      throw new ApiError('Withdrawal method is required', 400, 'validation_error');
+      throw new ApiError(
+        "Withdrawal method is required",
+        400,
+        "validation_error",
+      );
     }
-    
+
     // Check if crypto withdrawal requires wallet address
-    if (['cryptocurrency', 'bitcoin', 'ethereum', 'usdt'].includes(method.toLowerCase())) {
+    if (
+      ["cryptocurrency", "bitcoin", "ethereum", "usdt"].includes(
+        method.toLowerCase(),
+      )
+    ) {
       if (!walletAddress) {
-        throw new ApiError('Wallet address is required for cryptocurrency withdrawals', 400, 'validation_error');
+        throw new ApiError(
+          "Wallet address is required for cryptocurrency withdrawals",
+          400,
+          "validation_error",
+        );
       }
     }
-    
+
     // Check if bank transfer requires bank details
-    if (method.toLowerCase() === 'bank_transfer' && !bankDetails) {
-      throw new ApiError('Bank details are required for bank transfer withdrawals', 400, 'validation_error');
+    if (method.toLowerCase() === "bank_transfer" && !bankDetails) {
+      throw new ApiError(
+        "Bank details are required for bank transfer withdrawals",
+        400,
+        "validation_error",
+      );
     }
-    
+
     // Check if paypal requires email
-    if (method.toLowerCase() === 'paypal' && !paypalEmail) {
-      throw new ApiError('Email is required for PayPal withdrawals', 400, 'validation_error');
+    if (method.toLowerCase() === "paypal" && !paypalEmail) {
+      throw new ApiError(
+        "Email is required for PayPal withdrawals",
+        400,
+        "validation_error",
+      );
     }
-    
+
     // Check if user has sufficient balance
     const user = await User.findById(req.user._id).session(session);
-    
+
     if (!user) {
-      throw new ApiError('User not found', 404, 'not_found');
+      throw new ApiError("User not found", 404, "not_found");
     }
-    
+
     // Calculate fee (e.g., 1% of withdrawal amount)
     const feePercentage = 0.01;
     const fee = parseFloat((amount * feePercentage).toFixed(2));
     const totalAmount = parseFloat(amount) + fee;
-    
+
     if (user.balance < totalAmount) {
-      throw new ApiError(`Insufficient balance. You need ${totalAmount} (including ${fee} fee) but have ${user.balance}`, 400, 'insufficient_balance');
+      throw new ApiError(
+        `Insufficient balance. You need ${totalAmount} (including ${fee} fee) but have ${user.balance}`,
+        400,
+        "insufficient_balance",
+      );
     }
-    
+
     // Deduct amount from user balance
     user.balance -= totalAmount;
-    
+
     await User.updateOne(
       { _id: user._id },
       { $set: { balance: user.balance } },
-      { session }
+      { session },
     );
-    
+
     // Create withdrawal transaction
     const withdrawal = new Transaction({
       user: user._id,
-      type: 'withdrawal',
+      type: "withdrawal",
       amount: -parseFloat(amount),
       fee,
       currency,
@@ -140,41 +177,43 @@ export const createWithdrawal = async (req, res, next) => {
       cryptoType,
       paypalEmail,
       bankDetails,
-      status: 'pending',
+      status: "pending",
       description: description || `Withdrawal via ${method}`,
-      createdAt: new Date()
+      createdAt: new Date(),
     });
-    
+
     await withdrawal.save({ session });
-    
+
     // Create fee transaction
     const feeTransaction = new Transaction({
       user: user._id,
-      type: 'fee',
+      type: "fee",
       amount: -fee,
       currency,
-      method: 'system',
-      status: 'completed',
-      description: 'Withdrawal fee',
+      method: "system",
+      status: "completed",
+      description: "Withdrawal fee",
       reference: withdrawal._id.toString(),
-      processedAt: new Date()
+      processedAt: new Date(),
     });
-    
+
     await feeTransaction.save({ session });
-    
+
     await session.commitTransaction();
-    
+
     // Log the transaction
-    logger.info(`User ${req.user.email} created withdrawal request for ${amount} ${currency} via ${method}`);
-    
+    logger.info(
+      `User ${req.user.email} created withdrawal request for ${amount} ${currency} via ${method}`,
+    );
+
     res.status(201).json({
       success: true,
-      message: 'Withdrawal request created successfully',
-      data: withdrawal
+      message: "Withdrawal request created successfully",
+      data: withdrawal,
     });
   } catch (error) {
     await session.abortTransaction();
-    logger.error('Error creating withdrawal:', error);
+    logger.error("Error creating withdrawal:", error);
     next(error);
   } finally {
     session.endSession();
@@ -185,67 +224,69 @@ export const createWithdrawal = async (req, res, next) => {
 export const cancelWithdrawal = async (req, res, next) => {
   const session = await mongoose.startSession();
   session.startTransaction();
-  
+
   try {
     const { id } = req.params;
-    
+
     const withdrawal = await Transaction.findOne({
       _id: id,
       user: req.user._id,
-      type: 'withdrawal',
-      status: 'pending'
+      type: "withdrawal",
+      status: "pending",
     }).session(session);
-    
+
     if (!withdrawal) {
-      throw new ApiError('Pending withdrawal not found', 404, 'not_found');
+      throw new ApiError("Pending withdrawal not found", 404, "not_found");
     }
-    
+
     // Get the original amount and fee
     const originalAmount = Math.abs(withdrawal.amount);
     const fee = withdrawal.fee || 0;
-    
+
     // Update withdrawal status
-    withdrawal.status = 'cancelled';
+    withdrawal.status = "cancelled";
     withdrawal.updatedAt = new Date();
-    
+
     await withdrawal.save({ session });
-    
+
     // Refund the amount to user's balance (excluding fee)
     const user = await User.findById(req.user._id).session(session);
-    
+
     if (!user) {
-      throw new ApiError('User not found', 404, 'not_found');
+      throw new ApiError("User not found", 404, "not_found");
     }
-    
+
     await User.updateOne(
       { _id: user._id },
       { $inc: { balance: originalAmount } },
-      { session }
+      { session },
     );
-    
+
     // Create refund transaction
     const refundTransaction = new Transaction({
       user: user._id,
-      type: 'deposit',
+      type: "deposit",
       amount: originalAmount,
       currency: withdrawal.currency,
-      method: 'system',
-      status: 'completed',
-      description: 'Refund for cancelled withdrawal',
+      method: "system",
+      status: "completed",
+      description: "Refund for cancelled withdrawal",
       reference: withdrawal._id.toString(),
-      processedAt: new Date()
+      processedAt: new Date(),
     });
-    
+
     await refundTransaction.save({ session });
-    
+
     await session.commitTransaction();
-    
-    logger.info(`User ${req.user.email} cancelled withdrawal request ${id}, ${originalAmount} refunded`);
-    
+
+    logger.info(
+      `User ${req.user.email} cancelled withdrawal request ${id}, ${originalAmount} refunded`,
+    );
+
     res.status(200).json({
       success: true,
-      message: 'Withdrawal request cancelled successfully and funds refunded',
-      data: withdrawal
+      message: "Withdrawal request cancelled successfully and funds refunded",
+      data: withdrawal,
     });
   } catch (error) {
     await session.abortTransaction();
@@ -262,81 +303,111 @@ export const getWithdrawalMethods = async (req, res, next) => {
     // These could be stored in a database in a real application
     const withdrawalMethods = [
       {
-        id: 'bank_transfer',
-        name: 'Bank Transfer',
-        description: 'Withdraw directly to your bank account',
-        processingTime: '1-3 business days',
+        id: "bank_transfer",
+        name: "Bank Transfer",
+        description: "Withdraw directly to your bank account",
+        processingTime: "1-3 business days",
         minAmount: 100,
         maxAmount: 50000,
-        fee: '1%',
-        status: 'active',
+        fee: "1%",
+        status: "active",
         instructions: [
-          'Enter your bank account details',
-          'Confirm the withdrawal amount',
-          'Funds will be transferred within 1-3 business days'
+          "Enter your bank account details",
+          "Confirm the withdrawal amount",
+          "Funds will be transferred within 1-3 business days",
         ],
         fields: [
-          { name: 'accountName', label: 'Account Holder Name', type: 'text', required: true },
-          { name: 'accountNumber', label: 'Account Number', type: 'text', required: true },
-          { name: 'bankName', label: 'Bank Name', type: 'text', required: true },
-          { name: 'routingNumber', label: 'Routing Number / SWIFT Code', type: 'text', required: true }
-        ]
+          {
+            name: "accountName",
+            label: "Account Holder Name",
+            type: "text",
+            required: true,
+          },
+          {
+            name: "accountNumber",
+            label: "Account Number",
+            type: "text",
+            required: true,
+          },
+          {
+            name: "bankName",
+            label: "Bank Name",
+            type: "text",
+            required: true,
+          },
+          {
+            name: "routingNumber",
+            label: "Routing Number / SWIFT Code",
+            type: "text",
+            required: true,
+          },
+        ],
       },
       {
-        id: 'cryptocurrency',
-        name: 'Cryptocurrency',
-        description: 'Withdraw via Bitcoin, Ethereum, or USDT',
-        processingTime: '10-60 minutes',
+        id: "cryptocurrency",
+        name: "Cryptocurrency",
+        description: "Withdraw via Bitcoin, Ethereum, or USDT",
+        processingTime: "10-60 minutes",
         minAmount: 50,
         maxAmount: 500000,
-        fee: '1%',
-        status: 'active',
+        fee: "1%",
+        status: "active",
         instructions: [
-          'Select your preferred cryptocurrency',
-          'Enter your wallet address',
-          'Confirm the withdrawal amount'
+          "Select your preferred cryptocurrency",
+          "Enter your wallet address",
+          "Confirm the withdrawal amount",
         ],
         fields: [
-          { 
-            name: 'cryptoType', 
-            label: 'Cryptocurrency', 
-            type: 'select', 
+          {
+            name: "cryptoType",
+            label: "Cryptocurrency",
+            type: "select",
             required: true,
             options: [
-              { value: 'BTC', label: 'Bitcoin (BTC)' },
-              { value: 'ETH', label: 'Ethereum (ETH)' },
-              { value: 'USDT', label: 'Tether (USDT)' }
-            ]
+              { value: "BTC", label: "Bitcoin (BTC)" },
+              { value: "ETH", label: "Ethereum (ETH)" },
+              { value: "USDT", label: "Tether (USDT)" },
+            ],
           },
-          { name: 'walletAddress', label: 'Wallet Address', type: 'text', required: true }
-        ]
+          {
+            name: "walletAddress",
+            label: "Wallet Address",
+            type: "text",
+            required: true,
+          },
+        ],
       },
       {
-        id: 'paypal',
-        name: 'PayPal',
-        description: 'Withdraw to your PayPal account',
-        processingTime: '1-24 hours',
+        id: "paypal",
+        name: "PayPal",
+        description: "Withdraw to your PayPal account",
+        processingTime: "1-24 hours",
         minAmount: 10,
         maxAmount: 10000,
-        fee: '1%',
-        status: 'active',
+        fee: "1%",
+        status: "active",
         instructions: [
-          'Enter your PayPal email address',
-          'Confirm the withdrawal amount',
-          'Funds will be sent to your PayPal account'
+          "Enter your PayPal email address",
+          "Confirm the withdrawal amount",
+          "Funds will be sent to your PayPal account",
         ],
         fields: [
-          { name: 'paypalEmail', label: 'PayPal Email', type: 'email', required: true }
-        ]
-      }
+          {
+            name: "paypalEmail",
+            label: "PayPal Email",
+            type: "email",
+            required: true,
+          },
+        ],
+      },
     ];
-    
+
     res.status(200).json({
       success: true,
-      data: withdrawalMethods
+      data: withdrawalMethods,
     });
   } catch (error) {
-    logger.error('Error fetching withdrawal methods:', error);
+    logger.error("Error fetching withdrawal methods:", error);
     next(error);
   }
 };
@@ -345,50 +416,50 @@ export const getWithdrawalMethods = async (req, res, next) => {
 export const getWithdrawalStats = async (req, res, next) => {
   try {
     // Total withdrawals
-    const totalWithdrawals = await Transaction.countDocuments({ 
+    const totalWithdrawals = await Transaction.countDocuments({
       user: req.user._id,
-      type: 'withdrawal'
+      type: "withdrawal",
     });
-    
+
     // Pending withdrawals
-    const pendingWithdrawals = await Transaction.countDocuments({ 
+    const pendingWithdrawals = await Transaction.countDocuments({
       user: req.user._id,
-      type: 'withdrawal',
-      status: 'pending'
+      type: "withdrawal",
+      status: "pending",
     });
-    
+
     // Completed withdrawals
-    const completedWithdrawals = await Transaction.countDocuments({ 
+    const completedWithdrawals = await Transaction.countDocuments({
       user: req.user._id,
-      type: 'withdrawal',
-      status: 'completed'
+      type: "withdrawal",
+      status: "completed",
     });
-    
+
     // Total withdrawal amount
     const withdrawalVolume = await Transaction.aggregate([
-      { 
-        $match: { 
+      {
+        $match: {
           user: new mongoose.Types.ObjectId(req.user._id),
-          type: 'withdrawal',
-          status: 'completed'
-        } 
+          type: "withdrawal",
+          status: "completed",
+        },
       },
-      { 
-        $group: { 
-          _id: null, 
-          total: { $sum: { $abs: '$amount' } } 
-        } 
-      }
+      {
+        $group: {
+          _id: null,
+          total: { $sum: { $abs: "$amount" } },
+        },
+      },
     ]);
-    
+
     // Recent withdrawals
     const recentWithdrawals = await Transaction.find({
       user: req.user._id,
-      type: 'withdrawal'
+      type: "withdrawal",
     })
-    .sort({ createdAt: -1 })
-    .limit(5);
-    
+      .sort({ createdAt: -1 })
+      .limit(5);
+
     res.status(200).json({
       success: true,
       data: {
@@ -396,11 +467,11 @@ export const getWithdrawalStats = async (req, res, next) => {
         pending: pendingWithdrawals,
         completed: completedWithdrawals,
         volume: withdrawalVolume[0]?.total || 0,
-        recent: recentWithdrawals
-      }
+        recent: recentWithdrawals,
+      },
     });
   } catch (error) {
-    logger.error('Error fetching withdrawal statistics:', error);
+    logger.error("Error fetching withdrawal statistics:", error);
     next(error);
   }
 };
@@ -411,5 +482,5 @@ export default {
   createWithdrawal,
   cancelWithdrawal,
   getWithdrawalMethods,
-  getWithdrawalStats
+  getWithdrawalStats,
 };
