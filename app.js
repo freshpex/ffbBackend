@@ -27,6 +27,7 @@ import dashboardRouter from "./routes/dashboard.js";
 import priceAlertsRouter from "./routes/priceAlerts.js";
 import marketNewsRouter from "./routes/marketNews.js";
 import adminAnalyticsRouter from "./routes/adminAnalytics.js";
+import tradingRouter from "./routes/trading.js";
 
 // Initialize Express app
 const app = express();
@@ -71,6 +72,7 @@ app.use("/api/dashboard", dashboardRouter);
 app.use("/api/price-alerts", priceAlertsRouter);
 app.use("/api/market-news", marketNewsRouter);
 app.use("/api/admin/analytics", adminAnalyticsRouter);
+app.use("/api/trading", tradingRouter);
 
 // Error handling middleware
 app.use(errorHandler);
