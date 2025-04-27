@@ -33,15 +33,13 @@ const cryptoCompareService = {
     if (!cryptoCompareService.isConfigured()) {
       throw new Error("CryptoCompare API key is not configured");
     }
-
+  
     const apiKey = cryptoCompareService.getApiKey();
-
     const baseUrl = "https://min-api.cryptocompare.com/data";
     const url = `${baseUrl}/${endpoint}`;
-
     const queryParams = new URLSearchParams(params);
     const requestUrl = `${url}?${queryParams.toString()}`;
-
+  
     try {
       const apiCall = () =>
         axios.get(requestUrl, {
@@ -51,7 +49,7 @@ const cryptoCompareService = {
             "User-Agent": "Financial Freedom Broker/1.0",
           },
         });
-
+  
       const response = await callWithRetry(
         apiCall,
         {
@@ -61,16 +59,68 @@ const cryptoCompareService = {
         },
         `cryptocompare-${endpoint}`,
       );
-
-      // Check for API errors
-      if (response.data && response.data.Response === "Error") {
-        throw new Error(response.data.Message || "CryptoCompare API error");
+  
+      // More thorough check for API errors
+      if (response.data) {
+        if (response.data.Response === "Error") {
+          const apiError = new Error(response.data.Message || "CryptoCompare API error");
+          apiError.isApiError = true;
+          apiError.code = response.data.Type || 'UNKNOWN';
+          apiError.apiResponse = response.data;
+          logger.error(`CryptoCompare API error for ${endpoint}:`, {
+            message: response.data.Message,
+            code: response.data.Type,
+            params
+          });
+          throw apiError;
+        }
+        
+        // Check if response has expected format
+        if (!response.data.hasOwnProperty('Response') && !response.data.hasOwnProperty('Data') && 
+            Object.keys(response.data).length === 0) {
+          const emptyError = new Error("Empty or unexpected response from CryptoCompare API");
+          emptyError.isApiError = true;
+          emptyError.apiResponse = response.data;
+          logger.error(`CryptoCompare unexpected response for ${endpoint}:`, response.data);
+          throw emptyError;
+        }
       }
-
+  
       return response.data;
     } catch (error) {
-      logger.error(`CryptoCompare API error for ${endpoint}:`, error.message);
-      throw error;
+      // If it's already a handled API error, just rethrow it
+      if (error.isApiError) {
+        throw error;
+      }
+      
+      // More specific network error handling
+      if (axios.isAxiosError(error)) {
+        const networkError = new Error(`Network error when calling CryptoCompare API: ${error.message}`);
+        networkError.isNetworkError = true;
+        networkError.originalError = error;
+        
+        if (error.code === 'ECONNABORTED') {
+          networkError.message = `Timeout when calling CryptoCompare API: ${endpoint}`;
+          networkError.isTimeout = true;
+        } else if (!error.response) {
+          networkError.message = `Network error when calling CryptoCompare API: ${error.message}`;
+        } else {
+          networkError.status = error.response.status;
+          networkError.message = `HTTP ${error.response.status} error from CryptoCompare API: ${error.message}`;
+        }
+        
+        logger.error(`CryptoCompare network error for ${endpoint}:`, {
+          message: error.message,
+          code: error.code,
+          status: error.response?.status,
+          params
+        });
+        throw networkError;
+      }
+      
+      // Other unexpected errors
+      logger.error(`Unexpected error in CryptoCompare service for ${endpoint}:`, error);
+      throw new Error(`Unexpected error in CryptoCompare service: ${error.message}`);
     }
   },
 

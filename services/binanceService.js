@@ -3,110 +3,141 @@ import crypto from "crypto";
 import logger from "../middleware/logger.js";
 import config from "../config/config.js";
 
-// Initialize with config values
-const API_KEY = process.env.BINANCE_API_KEY;
-const API_SECRET = process.env.BINANCE_API_SECRET;
-const BASE_URL =
-  process.env.BINANCE_API_URL || "https://api.binance.com/api/v3";
-
-const generateSignature = (queryParams) => {
-  const queryString = Object.keys(queryParams)
-    .map((key) => `${key}=${queryParams[key]}`)
-    .join("&");
-
-  return crypto
-    .createHmac("sha256", API_SECRET)
-    .update(queryString)
-    .digest("hex");
-};
-
-const makeAuthenticatedRequest = async (
-  endpoint,
-  method = "GET",
-  params = {},
-) => {
-  try {
-    const timestamp = Date.now();
-    const queryParams = {
-      ...params,
-      timestamp,
-      recvWindow: 60000, // Valid for 60 seconds
-    };
-
-    // Generate signature
-    const signature = generateSignature(queryParams);
-    queryParams.signature = signature;
-
-    // Build query string
-    const queryString = Object.keys(queryParams)
-      .map((key) => `${key}=${encodeURIComponent(queryParams[key])}`)
-      .join("&");
-
-    // Make request
-    const url = `${BASE_URL}${endpoint}${method === "GET" ? "?" + queryString : ""}`;
-
-    const headers = {
-      "X-MBX-APIKEY": API_KEY,
-      "Content-Type": "application/x-www-form-urlencoded",
-    };
-
-    let response;
-    if (method === "GET") {
-      response = await axios.get(url, { headers });
-    } else if (method === "POST") {
-      response = await axios.post(url, queryString, { headers });
-    } else if (method === "DELETE") {
-      response = await axios.delete(url, {
-        headers,
-        params: queryParams,
-      });
-    }
-
-    return response.data;
-  } catch (error) {
-    logger.error(
-      `Error making authenticated request to ${endpoint}:`,
-      error.response?.data || error.message,
-    );
-    throw new Error(
-      `Binance API Error: ${error.response?.data?.msg || error.message}`,
-    );
-  }
-};
-
-const makePublicRequest = async (endpoint, params = {}) => {
-  try {
-    const queryString = Object.keys(params)
-      .map((key) => `${key}=${encodeURIComponent(params[key])}`)
-      .join("&");
-
-    const url = `${BASE_URL}${endpoint}${queryString ? "?" + queryString : ""}`;
-    const response = await axios.get(url);
-    return response.data;
-  } catch (error) {
-    logger.error(
-      `Error making public request to ${endpoint}:`,
-      error.response?.data || error.message,
-    );
-    throw new Error(
-      `Binance API Error: ${error.response?.data?.msg || error.message}`,
-    );
-  }
-};
-
 /**
  * Binance service for market data and trading
  */
 const binanceService = {
+  /**
+   * Check if the Binance service is properly configured
+   * @returns {boolean} - True if API keys are set
+   */
+  isConfigured: () => {
+    return !!process.env.BINANCE_API_KEY && !!process.env.BINANCE_API_SECRET;
+  },
+
+  /**
+   * Make a public request to Binance API (no authentication required)
+   * @param {string} path - API path
+   * @param {Object} params - Query parameters
+   * @returns {Promise<Object>} - API response data
+   */
+  makePublicRequest: async (path, params = {}) => {
+    try {
+      const url = `https://api.binance.com${path}`;
+      
+      const response = await axios.get(url, {
+        params,
+        headers: {
+          "X-MBX-APIKEY": process.env.BINANCE_API_KEY
+        }
+      });
+      
+      return response.data;
+    } catch (error) {
+      logger.error(
+        `Error making public request to ${path}:`,
+        error.response?.data || error.message,
+      );
+      throw new Error(
+        `Binance API Error: ${error.response?.data?.msg || error.message}`,
+      );
+    }
+  },
+
+  /**
+   * Make an authenticated request to Binance API
+   * @param {string} method - HTTP method (GET, POST, DELETE)
+   * @param {string} path - API path
+   * @param {Object} params - Query parameters
+   * @returns {Promise<Object>} - API response data
+   */
+  makeAuthenticatedRequest: async (method, path, params = {}) => {
+    try {
+      if (!binanceService.isConfigured()) {
+        throw new Error("Binance API is not configured");
+      }
+
+      const timestamp = Date.now();
+      const queryParams = {
+        ...params,
+        timestamp
+      };
+
+      // Generate signature
+      const queryString = Object.keys(queryParams)
+        .map((key) => `${key}=${queryParams[key]}`)
+        .join("&");
+
+      const signature = crypto
+        .createHmac("sha256", process.env.BINANCE_API_SECRET)
+        .update(queryString)
+        .digest("hex");
+
+      queryParams.signature = signature;
+
+      const url = `https://api.binance.com${path}`;
+      const headers = {
+        "X-MBX-APIKEY": process.env.BINANCE_API_KEY
+      };
+
+      let response;
+      if (method === "GET") {
+        response = await axios.get(url, {
+          params: queryParams,
+          headers
+        });
+      } else if (method === "POST") {
+        response = await axios.post(url, null, {
+          params: queryParams,
+          headers
+        });
+      } else if (method === "DELETE") {
+        response = await axios.delete(url, {
+          params: queryParams,
+          headers
+        });
+      }
+
+      return response.data;
+    } catch (error) {
+      logger.error(
+        `Error making authenticated request to ${path}:`,
+        error.response?.data || error.message,
+      );
+      throw new Error(
+        `Binance API Error: ${error.response?.data?.msg || error.message}`,
+      );
+    }
+  },
+
+  /**
+   * Get current price for a symbol
+   * @param {string} symbol - Trading pair symbol (e.g., BTCUSDT)
+   * @returns {Promise<Object>} - Price data
+   */
+  getPrice: async (symbol) => {
+    return binanceService.makePublicRequest("/api/v3/ticker/price", { symbol });
+  },
+
+  /**
+   * Get order book for a trading pair
+   * @param {string} symbol - Trading pair symbol (e.g., BTCUSDT)
+   * @param {number} limit - Depth of the order book
+   * @returns {Promise<Object>} - Order book data
+   */
+  getOrderBook: async (symbol, limit) => {
+    return binanceService.makePublicRequest("/api/v3/depth", { symbol, limit });
+  },
+
   /**
    * Get 24-hour ticker for a symbol
    * @param {string} symbol - The trading symbol (e.g., BTCUSDT)
    * @returns {Promise} - The ticker data
    */
   get24hrTicker: async (symbol) => {
-    const endpoint = "/ticker/24hr";
+    const endpoint = "/api/v3/ticker/24hr";
     const params = symbol ? { symbol } : {};
-    return makePublicRequest(endpoint, params);
+    return binanceService.makePublicRequest(endpoint, params);
   },
 
   /**
@@ -115,9 +146,9 @@ const binanceService = {
    * @returns {Promise} - The current price
    */
   getTickerPrice: async (symbol) => {
-    const endpoint = "/ticker/price";
+    const endpoint = "/api/v3/ticker/price";
     const params = symbol ? { symbol } : {};
-    return makePublicRequest(endpoint, params);
+    return binanceService.makePublicRequest(endpoint, params);
   },
 
   /**
@@ -129,7 +160,7 @@ const binanceService = {
    * @returns {Promise} - Klines data
    */
   getKlines: async (options) => {
-    const endpoint = "/klines";
+    const endpoint = "/api/v3/klines";
     const {
       symbol,
       interval = "1h",
@@ -142,7 +173,7 @@ const binanceService = {
     if (startTime) params.startTime = startTime;
     if (endTime) params.endTime = endTime;
 
-    return makePublicRequest(endpoint, params);
+    return binanceService.makePublicRequest(endpoint, params);
   },
 
   /**
@@ -150,8 +181,8 @@ const binanceService = {
    * @returns {Promise} - Exchange info
    */
   getExchangeInfo: async () => {
-    const endpoint = "/exchangeInfo";
-    return makePublicRequest(endpoint);
+    const endpoint = "/api/v3/exchangeInfo";
+    return binanceService.makePublicRequest(endpoint);
   },
 
   /**
@@ -161,9 +192,9 @@ const binanceService = {
    * @returns {Promise} - Order book data
    */
   getDepth: async (symbol, limit = 100) => {
-    const endpoint = "/depth";
+    const endpoint = "/api/v3/depth";
     const params = { symbol, limit };
-    return makePublicRequest(endpoint, params);
+    return binanceService.makePublicRequest(endpoint, params);
   },
 
   /**
@@ -173,9 +204,9 @@ const binanceService = {
    * @returns {Promise} - Recent trades data
    */
   getTrades: async (symbol, limit = 50) => {
-    const endpoint = "/trades";
+    const endpoint = "/api/v3/trades";
     const params = { symbol, limit };
-    return makePublicRequest(endpoint, params);
+    return binanceService.makePublicRequest(endpoint, params);
   },
 
   /**
@@ -183,54 +214,16 @@ const binanceService = {
    * @returns {Promise} - Account information
    */
   getAccountInfo: async () => {
-    const endpoint = "/account";
-    return makeAuthenticatedRequest(endpoint, "GET");
+    return binanceService.makeAuthenticatedRequest("GET", "/api/v3/account", {});
   },
 
   /**
    * Place a new order
    * @param {Object} orderParams - Order parameters
-   * @param {string} orderParams.symbol - Symbol to trade (e.g., BTCUSDT)
-   * @param {string} orderParams.side - Order side: BUY or SELL
-   * @param {string} orderParams.type - Order type: LIMIT, MARKET, STOP_LOSS, etc.
-   * @param {string} orderParams.timeInForce - Time in force: GTC, IOC, FOK
-   * @param {number} orderParams.quantity - Order quantity
-   * @param {number} orderParams.price - Order price (for limit orders)
-   * @param {string} orderParams.newClientOrderId - Custom client order ID
    * @returns {Promise} - Order response
    */
-  placeOrder: async (orderParams) => {
-    const endpoint = "/order";
-
-    // Validate required parameters based on order type
-    if (!orderParams.symbol || !orderParams.side || !orderParams.type) {
-      throw new Error(
-        "Missing required order parameters: symbol, side, or type",
-      );
-    }
-
-    // Convert side to uppercase
-    orderParams.side = orderParams.side.toUpperCase();
-
-    // Convert type to uppercase
-    orderParams.type = orderParams.type.toUpperCase();
-
-    // Set default timeInForce for LIMIT orders
-    if (orderParams.type === "LIMIT" && !orderParams.timeInForce) {
-      orderParams.timeInForce = "GTC"; // Good Till Cancelled
-    }
-
-    // For MARKET orders, we don't need price
-    if (orderParams.type === "MARKET" && orderParams.price) {
-      delete orderParams.price;
-    }
-
-    // Use the provided newClientOrderId or generate one
-    if (!orderParams.newClientOrderId) {
-      orderParams.newClientOrderId = `ffb_${Date.now()}`;
-    }
-
-    return makeAuthenticatedRequest(endpoint, "POST", orderParams);
+  createOrder: async (orderParams) => {
+    return binanceService.makeAuthenticatedRequest("POST", "/api/v3/order", orderParams);
   },
 
   /**
@@ -240,21 +233,7 @@ const binanceService = {
    * @returns {Promise} - Cancel response
    */
   cancelOrder: async (symbol, orderId) => {
-    const endpoint = "/order";
-    const params = { symbol, orderId };
-    return makeAuthenticatedRequest(endpoint, "DELETE", params);
-  },
-
-  /**
-   * Cancel an order by client order ID
-   * @param {string} symbol - Symbol (e.g., BTCUSDT)
-   * @param {string} origClientOrderId - Original client order ID
-   * @returns {Promise} - Cancel response
-   */
-  cancelOrderByClientId: async (symbol, origClientOrderId) => {
-    const endpoint = "/order";
-    const params = { symbol, origClientOrderId };
-    return makeAuthenticatedRequest(endpoint, "DELETE", params);
+    return binanceService.makeAuthenticatedRequest("DELETE", "/api/v3/order", { symbol, orderId });
   },
 
   /**
@@ -263,9 +242,8 @@ const binanceService = {
    * @returns {Promise} - Open orders
    */
   getOpenOrders: async (symbol) => {
-    const endpoint = "/openOrders";
     const params = symbol ? { symbol } : {};
-    return makeAuthenticatedRequest(endpoint, "GET", params);
+    return binanceService.makeAuthenticatedRequest("GET", "/api/v3/openOrders", params);
   },
 
   /**
@@ -275,21 +253,8 @@ const binanceService = {
    * @returns {Promise} - Order info
    */
   getOrder: async (symbol, orderId) => {
-    const endpoint = "/order";
     const params = { symbol, orderId };
-    return makeAuthenticatedRequest(endpoint, "GET", params);
-  },
-
-  /**
-   * Get order status by client order ID
-   * @param {string} symbol - Symbol (e.g., BTCUSDT)
-   * @param {string} origClientOrderId - Client order ID
-   * @returns {Promise} - Order info
-   */
-  getOrderByClientId: async (symbol, origClientOrderId) => {
-    const endpoint = "/order";
-    const params = { symbol, origClientOrderId };
-    return makeAuthenticatedRequest(endpoint, "GET", params);
+    return binanceService.makeAuthenticatedRequest("GET", "/api/v3/order", params);
   },
 
   /**
@@ -299,18 +264,9 @@ const binanceService = {
    * @returns {Promise} - Account orders
    */
   getAllOrders: async (symbol, limit = 500) => {
-    const endpoint = "/allOrders";
     const params = { symbol, limit };
-    return makeAuthenticatedRequest(endpoint, "GET", params);
-  },
-
-  /**
-   * Check if the Binance service is properly configured
-   * @returns {boolean} - True if API keys are set
-   */
-  isConfigured: () => {
-    return !!API_KEY && !!API_SECRET;
-  },
+    return binanceService.makeAuthenticatedRequest("GET", "/api/v3/allOrders", params);
+  }
 };
 
 export default binanceService;
