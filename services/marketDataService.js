@@ -6,8 +6,8 @@ import config from '../config/config.js';
 
 class MarketDataService {
   constructor() {
-    this.mockData = config.marketData.useMockData || false;
-    this.usingExchangeAPI = config.binance.apiKey !== '';
+    this.mockData = config.marketData?.useMockData || false;
+    this.usingExchangeAPI = config.binance?.apiKey && config.binance.apiKey !== '';
     this.prices = {};
     this.lastUpdated = {};
     this.updateInterval = 30000; // 30 seconds cache time
@@ -16,6 +16,11 @@ class MarketDataService {
   // Get current price for a symbol
   async getPrice(symbol) {
     try {
+      if (!symbol) {
+        logger.error('Symbol is required for getPrice');
+        return null;
+      }
+
       const now = Date.now();
       if (
         this.prices[symbol] && 
@@ -43,6 +48,7 @@ class MarketDataService {
           const binanceData = await binanceService.getPrice(formattedSymbol);
           if (binanceData && binanceData.price) {
             price = parseFloat(binanceData.price);
+            logger.debug(`Binance price for ${symbol}: ${price}`);
           }
         } catch (error) {
           logger.warn(`Binance price fetch failed for ${symbol}: ${error.message}`);
@@ -55,10 +61,9 @@ class MarketDataService {
           const cryptoSymbol = symbol.split('/')[0];
           const quoteSymbol = symbol.split('/')[1] || 'USD';
           
-          const cryptoCompareData = await cryptoCompareService.getPrice(cryptoSymbol, quoteSymbol);
-          if (cryptoCompareData) {
-            price = parseFloat(cryptoCompareData);
-          }
+          // Use the proper getPrice method which should handle errors internally now
+          price = await cryptoCompareService.getPrice(cryptoSymbol, quoteSymbol);
+          logger.debug(`CryptoCompare price for ${symbol}: ${price}`);
         } catch (error) {
           logger.warn(`CryptoCompare price fetch failed for ${symbol}: ${error.message}`);
         }
@@ -80,6 +85,7 @@ class MarketDataService {
       // If all API calls fail, fall back to mock data
       if (!price) {
         price = this.getMockPrice(symbol);
+        logger.info(`Using fallback mock price for ${symbol}: ${price}`);
       }
 
       this.prices[symbol] = price;
