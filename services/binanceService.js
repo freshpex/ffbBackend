@@ -155,6 +155,7 @@ const binanceService = {
     } catch (error) {
       logger.error(`Error fetching price from Binance for ${symbol}:`, error);
       
+      // Classify error types for better handling in the fallback chain
       if (error.response) {
         const statusCode = error.response.status;
         
@@ -176,6 +177,7 @@ const binanceService = {
         error.message = `Network error calling Binance API for ${symbol}: ${error.message}`;
       }
       
+      // Explicitly throw so the marketDataService can catch and handle it
       throw error;
     }
   },

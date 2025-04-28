@@ -18,29 +18,21 @@ export const getMarketPrice = async (req, res, next) => {
             throw new ApiError("Symbol is required", 400, "invalid_request");
         }
 
-        // Get current price from market data service
-        const price = await marketDataService.getPrice(symbol);
+        const priceData = await marketDataService.getPrice(symbol);
         
-        // Get 24h price change data
-        let priceChange = 0;
-        let priceChangePercent = 0;
-        
-        try {
-            const priceChangeData = await marketDataService.getPriceChange(symbol);
-            priceChange = priceChangeData.change || 0;
-            priceChangePercent = priceChangeData.changePercent || 0;
-        } catch (changeError) {
-            logger.warn(`Could not fetch price change for ${symbol}: ${changeError.message}`);
+        if (!priceData) {
+            throw new ApiError(`Could not fetch price for ${symbol}`, 404, "price_unavailable");
         }
 
         res.status(200).json({
             success: true,
             data: {
-                symbol,
-                price,
-                priceChange,
-                priceChangePercent,
-                timestamp: Date.now()
+                symbol: priceData.symbol,
+                price: priceData.price,
+                priceChange: priceData.change,
+                priceChangePercent: priceData.changePercent,
+                direction: priceData.direction,
+                timestamp: priceData.lastUpdated || Date.now()
             }
         });
     } catch (error) {
@@ -69,37 +61,21 @@ export const getAllMarketPrices = async (req, res, next) => {
 
         const marketPrices = {};
 
-        await Promise.all(
-            symbolsList.map(async (symbol) => {
-                try {
-                    const price = await marketDataService.getPrice(symbol);
-                    
-                    // Get 24h price change data
-                    let priceChange = 0;
-                    let priceChangePercent = 0;
-                    
-                    try {
-                        const priceChangeData = await marketDataService.getPriceChange(symbol);
-                        priceChange = priceChangeData.change || 0;
-                        priceChangePercent = priceChangeData.changePercent || 0;
-                    } catch (changeError) {
-                        logger.warn(`Could not fetch price change for ${symbol}: ${changeError.message}`);
-                    }
-
-                    if (price !== null) {
-                        marketPrices[symbol] = {
-                            symbol,
-                            price,
-                            priceChange,
-                            priceChangePercent,
-                            timestamp: Date.now()
-                        };
-                    }
-                } catch (error) {
-                    logger.warn(`Error fetching price for ${symbol}: ${error.message}`);
-                }
-            })
-        );
+        // Use the new getPrices method to get price data for all symbols at once
+        const pricesData = await marketDataService.getPrices(symbolsList);
+        
+        pricesData.forEach(priceData => {
+            if (priceData && priceData.symbol) {
+                marketPrices[priceData.symbol] = {
+                    symbol: priceData.symbol,
+                    price: priceData.price,
+                    priceChange: priceData.change,
+                    priceChangePercent: priceData.changePercent,
+                    direction: priceData.direction,
+                    timestamp: priceData.lastUpdated || Date.now()
+                };
+            }
+        });
 
         res.status(200).json({
             success: true,

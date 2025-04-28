@@ -9,6 +9,7 @@ class MarketDataService {
     this.mockData = config.marketData?.useMockData || false;
     this.usingExchangeAPI = config.binance?.apiKey && config.binance.apiKey !== '';
     this.prices = {};
+    this.previousPrices = {};
     this.lastUpdated = {};
     this.updateInterval = 30000; // 30 seconds cache time
     
@@ -16,7 +17,7 @@ class MarketDataService {
     this.maxRetries = 2; // Number of retries per provider
     this.retryDelay = 1000; // Base delay in ms between retries
     this.providers = {
-      crypto: ['binance', 'cryptoCompare', 'alphaVantage'],
+      crypto: ['cryptoCompare', 'binance', 'alphaVantage'],
       stock: ['alphaVantage', 'cryptoCompare'] // Some financial APIs provide stock data as well
     };
   }
@@ -66,14 +67,17 @@ class MarketDataService {
         this.lastUpdated[symbol] && 
         now - this.lastUpdated[symbol] < this.updateInterval
       ) {
-        return this.prices[symbol];
+        return this.getPriceWithChanges(symbol, this.prices[symbol]);
       }
 
       if (this.mockData) {
         const mockPrice = this.getMockPrice(symbol);
+        if (this.prices[symbol]) {
+          this.previousPrices[symbol] = this.prices[symbol];
+        }
         this.prices[symbol] = mockPrice;
         this.lastUpdated[symbol] = now;
-        return mockPrice;
+        return this.getPriceWithChanges(symbol, mockPrice);
       }
 
       // Try to get price from different sources with fallback mechanism
@@ -172,13 +176,61 @@ class MarketDataService {
         logger.warn(`All providers failed for ${symbol}, using fallback mock price: ${price}`);
       }
 
+      // Store the previous price before updating
+      if (this.prices[symbol]) {
+        this.previousPrices[symbol] = this.prices[symbol];
+      }
       this.prices[symbol] = price;
       this.lastUpdated[symbol] = now;
       
-      return price;
+      return this.getPriceWithChanges(symbol, price);
     } catch (error) {
       logger.error(`Error in getPrice for ${symbol}:`, error);
-      return this.getMockPrice(symbol);
+      return this.getPriceWithChanges(symbol, this.getMockPrice(symbol));
+    }
+  }
+
+  /**
+   * Calculate price change and percentage and return enhanced price object
+   * @param {string} symbol - The trading symbol
+   * @param {number} currentPrice - The current price value
+   * @returns {Object} - Enhanced price object with change data
+   */
+  getPriceWithChanges(symbol, currentPrice) {
+    const previousPrice = this.previousPrices[symbol] || currentPrice; // Default to current if no previous
+    const change = currentPrice - previousPrice;
+    const changePercent = previousPrice > 0 ? (change / previousPrice) * 100 : 0;
+
+    return {
+      symbol,
+      price: currentPrice,
+      change: parseFloat(change.toFixed(6)),
+      changePercent: parseFloat(changePercent.toFixed(2)),
+      direction: change > 0 ? 'up' : change < 0 ? 'down' : 'stable',
+      lastUpdated: this.lastUpdated[symbol] || Date.now()
+    };
+  }
+  
+  /**
+   * Get prices for multiple symbols with price change data
+   * @param {Array<string>} symbols - Array of symbols to get prices for
+   * @returns {Promise<Array<Object>>} - Array of price objects with change data
+   */
+  async getPrices(symbols = []) {
+    try {
+      const results = [];
+      
+      for (const symbol of symbols) {
+        const priceData = await this.getPrice(symbol);
+        if (priceData) {
+          results.push(priceData);
+        }
+      }
+      
+      return results;
+    } catch (error) {
+      logger.error('Error in getPrices:', error);
+      return [];
     }
   }
 
@@ -289,79 +341,164 @@ class MarketDataService {
     }
   }
 
-  /**
-   * Get OHLCV candles for a trading pair
-   * @param {string} symbol - The trading pair symbol
-   * @param {string} interval - The interval for candles (1m, 5m, 15m, 30m, 1h, 2h, 4h, 1d, 1w)
-   * @param {number} limit - The number of candles to return
-   * @returns {Promise<Array>} - The candles array
-   */
-  async getCandles(symbol, interval, limit = 100) {
+  // Get candlestick/chart data
+  async getCandles({ symbol, interval = '1h', limit = 100 }) {
     try {
-      // Handle cryptocurrency data using CryptoCompare or Binance
-      if (this.isCryptoSymbol(symbol)) {
-        try {
-          // Try CryptoCompare first
-          const cryptoCompareData = await this.cryptoCompareService.getHistoricalData(symbol, interval, limit);
-          if (cryptoCompareData && cryptoCompareData.length > 0) {
-            return cryptoCompareData;
-          }
-        } catch (error) {
-          this.logger.warn(`CryptoCompare data fetch failed for ${symbol}, falling back to Binance: ${error.message}`);
-        }
+      // If mock data is enabled, return mock candles
+      if (this.mockData) {
+        return this.getMockCandles(symbol, interval, limit);
+      }
+      
+      // Determine which provider list to use based on asset type
+      const providerList = this.isCryptoSymbol(symbol) 
+        ? this.providers.crypto 
+        : this.providers.stock;
+      
+      logger.info(`Fetching candles for ${symbol} using provider sequence: ${providerList.join(', ')}`);
+      
+      let candles = null;
+      
+      // Try each provider in sequence with retries
+      for (const provider of providerList) {
+        if (candles) break;
+        
+        logger.info(`Attempting to fetch candles from ${provider} for ${symbol}`);
 
-        try {
-          // Try Binance as fallback for crypto
-          const binanceData = await this.binanceService.getHistoricalData(symbol, interval, limit);
-          if (binanceData && binanceData.length > 0) {
-            return binanceData;
-          }
-        } catch (error) {
-          this.logger.warn(`Binance data fetch failed for ${symbol}: ${error.message}`);
-        }
-      } 
-      // Handle stocks and commodities using AlphaVantage
-      else if (this.isStockSymbol(symbol) || this.isCommoditySymbol(symbol)) {
-        try {
-          // Extract the base symbol (e.g., AAPL from AAPL/USD)
+        if (provider === 'cryptoCompare' && this.isCryptoSymbol(symbol)) {
+          // Try CryptoCompare with retries
           const baseSymbol = symbol.split('/')[0];
+          const quoteSymbol = symbol.split('/')[1] || 'USD';
           
-          // For commodities, we need to use specific mapping for AlphaVantage
-          let alphaSymbol = baseSymbol;
-          if (this.isCommoditySymbol(symbol)) {
-            // Map common commodity symbols to AlphaVantage format
-            const commodityMap = {
-              'GOLD': 'XAUUSD',
-              'SILVER': 'XAGUSD',
-              'OIL': 'CL',
-              'XAU': 'XAUUSD',
-              'XAG': 'XAGUSD'
-            };
-            alphaSymbol = commodityMap[baseSymbol] || baseSymbol;
+          try {
+            const cryptoCompareCandles = await this.retryOperation(
+              async () => {
+                const data = await cryptoCompareService.getHistoricalData(baseSymbol, quoteSymbol, interval, limit);
+                if (!data || !data.length) {
+                  throw new Error('Invalid candles response from CryptoCompare');
+                }
+                return data;
+              },
+              this.maxRetries,
+              this.retryDelay,
+              'CryptoCompare',
+              symbol
+            );
+            
+            if (cryptoCompareCandles) {
+              logger.info(`Successfully fetched candles from CryptoCompare for ${symbol}`);
+              
+              candles = cryptoCompareCandles.map(candle => ({
+                timestamp: candle.time * 1000,
+                open: parseFloat(candle.open),
+                high: parseFloat(candle.high),
+                low: parseFloat(candle.low),
+                close: parseFloat(candle.close),
+                volume: parseFloat(candle.volumefrom)
+              }));
+              break;
+            }
+          } catch (error) {
+            logger.warn(`CryptoCompare candles fetch failed for ${symbol}: ${error.message}`);
           }
+        }
+        
+        if (provider === 'binance' && this.isCryptoSymbol(symbol) && this.usingExchangeAPI) {
+          // Try Binance with retries
+          const formattedSymbol = this.formatSymbolForExchange(symbol, "binance");
           
-          // Convert our interval format to AlphaVantage format
-          const alphaInterval = this.convertIntervalToAlphaVantage(interval);
-          
-          const alphaData = await this.alphaVantageService.getHistoricalData(
-            alphaSymbol, 
-            alphaInterval, 
-            limit
+          const binanceKlines = await this.retryOperation(
+            async () => {
+              const data = await binanceService.getKlines(formattedSymbol, interval, limit);
+              if (!data || !data.length) {
+                throw new Error('Invalid klines response from Binance');
+              }
+              return data;
+            },
+            this.maxRetries,
+            this.retryDelay,
+            'Binance',
+            symbol
           );
           
-          if (alphaData && alphaData.length > 0) {
-            return alphaData;
+          if (binanceKlines) {
+            logger.info(`Successfully fetched candles from Binance for ${symbol}`);
+            
+            candles = binanceKlines.map(kline => ({
+              timestamp: kline[0],
+              open: parseFloat(kline[1]),
+              high: parseFloat(kline[2]),
+              low: parseFloat(kline[3]),
+              close: parseFloat(kline[4]),
+              volume: parseFloat(kline[5]),
+              closeTime: kline[6],
+              quoteAssetVolume: parseFloat(kline[7]),
+              trades: kline[8],
+              buyBaseAssetVolume: parseFloat(kline[9]),
+              buyQuoteAssetVolume: parseFloat(kline[10])
+            }));
+            
+            break;
           }
-        } catch (error) {
-          this.logger.warn(`AlphaVantage data fetch failed for ${symbol}: ${error.message}`);
+        }
+        
+        if (provider === 'alphaVantage' && !this.isCryptoSymbol(symbol)) {
+          // Try AlphaVantage with retries for stock data
+          const stockSymbol = symbol.split('/')[0];
+          
+          try {
+            const alphaVantageCandles = await this.retryOperation(
+              async () => {
+                // Choose appropriate time series based on interval
+                const timeSeriesFunction = interval.includes('d') 
+                  ? 'getDailyTimeSeries' 
+                  : 'getIntradayTimeSeries';
+                
+                const data = await alphaVantageService[timeSeriesFunction](stockSymbol, interval, limit);
+                if (!data || !data['Time Series']) {
+                  throw new Error('Invalid candles response from Alpha Vantage');
+                }
+                return data;
+              },
+              this.maxRetries,
+              this.retryDelay,
+              'Alpha Vantage',
+              symbol
+            );
+            
+            if (alphaVantageCandles && alphaVantageCandles['Time Series']) {
+              logger.info(`Successfully fetched candles from Alpha Vantage for ${symbol}`);
+              
+              // Transform Alpha Vantage data to our candle format
+              const timeSeries = alphaVantageCandles['Time Series'];
+              candles = Object.keys(timeSeries).map(dateStr => {
+                const data = timeSeries[dateStr];
+                return {
+                  timestamp: new Date(dateStr).getTime(),
+                  open: parseFloat(data['1. open']),
+                  high: parseFloat(data['2. high']),
+                  low: parseFloat(data['3. low']),
+                  close: parseFloat(data['4. close']),
+                  volume: parseFloat(data['5. volume'])
+                };
+              }).slice(0, limit);
+              
+              break;
+            }
+          } catch (error) {
+            logger.warn(`Alpha Vantage candles fetch failed for ${symbol}: ${error.message}`);
+          }
         }
       }
-
-      // If all API calls failed or the symbol type is not supported, use mock data as last resort
-      this.logger.warn(`Falling back to mock data for ${symbol} with interval ${interval}`);
-      return this.getMockCandles(symbol, interval, limit);
+      
+      // If all API calls fail, fall back to mock data
+      if (!candles) {
+        candles = this.getMockCandles(symbol, interval, limit);
+        logger.warn(`All providers failed for ${symbol} candles, using fallback mock data`);
+      }
+      
+      return candles;
     } catch (error) {
-      this.logger.error(`Error in getCandles for ${symbol}: ${error.message}`);
+      logger.error(`Error in getCandles for ${symbol}:`, error);
       return this.getMockCandles(symbol, interval, limit);
     }
   }
@@ -458,49 +595,14 @@ class MarketDataService {
   
   // Helper to check if a symbol is a crypto pair
   isCryptoSymbol(symbol) {
-    // Common crypto base symbols
-    const cryptoSymbols = ['BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'ADA', 'DOT', 'DOGE', 'AVAX', 'MATIC'];
+    if (!symbol) return false;
+    
+    // Common crypto base assets
+    const cryptoAssets = ['BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'ADA', 'DOT', 'DOGE', 'AVAX', 'MATIC'];
     const baseAsset = symbol.split('/')[0];
-    return cryptoSymbols.includes(baseAsset);
+    
+    return cryptoAssets.includes(baseAsset) || symbol.includes('USDT') || symbol.includes('USD');
   }
-  
-  /**
-   * Check if the given symbol represents a commodity
-   * @param {string} symbol - The trading pair symbol
-   * @returns {boolean} - True if the symbol represents a commodity
-   */
-  isCommoditySymbol(symbol) {
-    const commoditySymbols = ['GOLD', 'SILVER', 'OIL', 'XAU', 'XAG', 'CL', 'NATGAS', 'BRENT'];
-    const baseSymbol = symbol.split('/')[0];
-    return commoditySymbols.includes(baseSymbol);
-  }
-
-  // Helper to check if a symbol is a stock
-  isStockSymbol(symbol) {
-    // If it's not crypto and not commodity, assume it's a stock
-    return !this.isCryptoSymbol(symbol) && !this.isCommoditySymbol(symbol);
-  }
-  
-  // Convert our interval format to AlphaVantage format
-  convertIntervalToAlphaVantage(interval) {
-    const mapping = {
-      '1m': '1min',
-      '5m': '5min',
-      '15m': '15min',
-      '30m': '30min',
-      '1h': '60min',
-      '4h': 'daily', // AlphaVantage doesn't have 4h, using daily as closest
-      '1d': 'daily',
-      '1w': 'weekly'
-    };
-    return mapping[interval] || 'daily'; // Default to daily if interval not found
-  }
-
-  /**
-   * Check if the given symbol represents a cryptocurrency
-   * @param {string} symbol - The trading pair symbol
-   * @returns {boolean} - True if the symbol represents a cryptocurrency
-   */
   
   // Get base price for mock data
   getBasePrice(symbol) {
