@@ -132,29 +132,51 @@ const binanceService = {
   },
 
   /**
-   * Get current price for a symbol
-   * @param {string} symbol - Trading pair symbol (e.g., BTCUSDT)
-   * @returns {Promise<Object>} - Price data
+   * Get price for a trading pair
+   * @param {string} symbol - Trading pair symbol
+   * @returns {Promise<Object>} Price object
    */
   getPrice: async (symbol) => {
     try {
-      const formattedSymbol = symbol.replace('/', '');
-      return await binanceService.makePublicRequest("/api/v3/ticker/price", { symbol: formattedSymbol });
+      if (!binanceService.isConfigured()) {
+        const configError = new Error("Binance API not configured");
+        configError.isConfigError = true;
+        logger.warn("Binance API not properly configured");
+        throw configError;
+      }
+
+      const response = await binanceService.makePublicRequest('/api/v3/ticker/price', { symbol });
+      if (!response || !response.price) {
+        throw new Error(`Invalid price response for ${symbol}`);
+      }
+      
+      logger.debug(`Binance price for ${symbol}: ${response.price}`);
+      return response;
     } catch (error) {
-      // Return a mock price as fallback
-      logger.warn(`Using fallback mock price for ${symbol}: ${error.message}`);
+      logger.error(`Error fetching price from Binance for ${symbol}:`, error);
       
-      // Generate more realistic mock prices based on the symbol
-      let mockPrice;
-      if (symbol.includes('BTC')) mockPrice = Math.random() * 1000 + 45000;
-      else if (symbol.includes('ETH')) mockPrice = Math.random() * 100 + 2900;
-      else if (symbol.includes('BNB')) mockPrice = Math.random() * 20 + 380;
-      else mockPrice = Math.random() * 10 + 1;
+      if (error.response) {
+        const statusCode = error.response.status;
+        
+        if (statusCode === 429) {
+          error.isRateLimitError = true;
+          error.message = `Rate limit exceeded for Binance API: ${symbol}`;
+        } else if (statusCode === 400) {
+          error.isInvalidRequestError = true;
+          error.message = `Invalid request to Binance API for symbol: ${symbol}`;
+        } else if (statusCode >= 500) {
+          error.isServerError = true;
+          error.message = `Binance server error (${statusCode}) for symbol: ${symbol}`;
+        }
+      } else if (error.code === 'ECONNABORTED') {
+        error.isTimeoutError = true;
+        error.message = `Timeout while connecting to Binance API for ${symbol}`;
+      } else if (!error.isConfigError) {
+        error.isNetworkError = true;
+        error.message = `Network error calling Binance API for ${symbol}: ${error.message}`;
+      }
       
-      return {
-        symbol: symbol.replace('/', ''),
-        price: mockPrice.toFixed(2)
-      };
+      throw error;
     }
   },
 
@@ -333,6 +355,10 @@ const binanceService = {
    */
   createOrder: async (orderParams) => {
     try {
+      if (!binanceService.isConfigured()) {
+        throw new Error("Binance API is not configured with valid API keys");
+      }
+      
       if (!orderParams || !orderParams.symbol) {
         throw new Error("Invalid order parameters: symbol is required");
       }
@@ -340,6 +366,15 @@ const binanceService = {
       // Format the symbol if it contains a slash
       if (orderParams.symbol.includes('/')) {
         orderParams.symbol = orderParams.symbol.replace('/', '');
+      }
+
+      // Validate essential parameters
+      if (!orderParams.side || !['BUY', 'SELL'].includes(orderParams.side.toUpperCase())) {
+        throw new Error("Order side must be either 'BUY' or 'SELL'");
+      }
+      
+      if (!orderParams.type) {
+        throw new Error("Order type is required");
       }
 
       // Ensure quantity is a string for Binance API
@@ -352,29 +387,55 @@ const binanceService = {
         orderParams.price = orderParams.price.toString();
       }
 
-      logger.debug('Placing order with Binance:', orderParams);
-      
-      return await binanceService.makeAuthenticatedRequest("POST", "/api/v3/order", orderParams);
-    } catch (error) {
-      logger.warn(`Using mock order creation for ${orderParams?.symbol || 'unknown symbol'}: ${error.message}`);
-      
-      // Generate a mock response that simulates a successful order
-      return {
-        symbol: orderParams?.symbol || 'BTCUSDT',
-        orderId: Math.floor(Math.random() * 1000000000),
-        orderListId: -1,
-        clientOrderId: `mock_${Date.now()}`,
-        transactTime: Date.now(),
-        price: orderParams?.price || "0.00",
-        origQty: orderParams?.quantity || "0.00",
-        executedQty: "0.00",
-        cummulativeQuoteQty: "0.00",
-        status: "NEW",
-        timeInForce: orderParams?.timeInForce || "GTC",
-        type: orderParams?.type || "LIMIT",
-        side: orderParams?.side || "BUY",
-        fills: []
+      // Standardize parameters
+      const standardizedParams = {
+        ...orderParams,
+        side: orderParams.side.toUpperCase(),
+        type: orderParams.type.toUpperCase()
       };
+
+      logger.debug('Placing order with Binance:', standardizedParams);
+      
+      const response = await binanceService.makeAuthenticatedRequest(
+        "POST", 
+        "/api/v3/order", 
+        standardizedParams
+      );
+      
+      logger.info(`Successfully placed ${orderParams.side} order for ${orderParams.symbol}`, {
+        orderId: response.orderId,
+        symbol: response.symbol,
+        side: response.side,
+        type: response.type,
+        status: response.status
+      });
+      
+      return response;
+    } catch (error) {
+      // Log specific error details
+      const errorMsg = error.response?.data?.msg || error.message;
+      const errorCode = error.response?.data?.code;
+      
+      logger.error(`Failed order creation for ${orderParams?.symbol || 'unknown symbol'}`, {
+        error: errorMsg,
+        code: errorCode,
+        params: orderParams
+      });
+      
+      // Provide more specific error message based on common Binance error codes
+      let userFriendlyError;
+      
+      if (errorCode === -2010 || errorMsg.includes('insufficient balance')) {
+        userFriendlyError = `Insufficient balance for ${orderParams.side} order of ${orderParams.symbol}`;
+      } else if (errorCode === -1121) {
+        userFriendlyError = `Invalid symbol: ${orderParams.symbol}`;
+      } else if (errorCode === -1100 || errorCode === -1111) {
+        userFriendlyError = `Invalid order parameters: ${errorMsg}`;
+      } else {
+        userFriendlyError = `Order creation failed: ${errorMsg}`;
+      }
+      
+      throw new Error(userFriendlyError);
     }
   },
 

@@ -11,98 +11,104 @@ const TRADING_FEE_PERCENTAGE = parseFloat(process.env.TRADING_FEE_PERCENTAGE || 
 
 // Get market price for a symbol
 export const getMarketPrice = async (req, res, next) => {
-  try {
-    const { symbol } = req.query;
+    try {
+        const { symbol } = req.query;
 
-    if (!symbol) {
-      throw new ApiError("Symbol is required", 400, "invalid_request");
-    }
-
-    // Get current price from market data service using the fixed method
-    const price = await marketDataService.getPrice(symbol);
-
-    if (price === null || price === undefined) {
-      logger.warn(`Price not available for ${symbol}, returning fallback price`);
-      // Provide a fallback price rather than returning an error
-      const fallbackPrice = symbol.includes('BTC') ? 48000 : 
-                           (symbol.includes('ETH') ? 3200 : 
-                           (symbol.includes('BNB') ? 410 : 100));
-      
-      res.status(200).json({
-        success: true,
-        data: {
-          symbol,
-          price: fallbackPrice,
-          timestamp: Date.now(),
-          isFallback: true
+        if (!symbol) {
+            throw new ApiError("Symbol is required", 400, "invalid_request");
         }
-      });
-      return;
-    }
 
-    res.status(200).json({
-      success: true,
-      data: {
-        symbol,
-        price,
-        timestamp: Date.now()
-      }
-    });
-  } catch (error) {
-    logger.error(`Error fetching market price: ${error.message}`);
-    next(error);
-  }
+        // Get current price from market data service
+        const price = await marketDataService.getPrice(symbol);
+        
+        // Get 24h price change data
+        let priceChange = 0;
+        let priceChangePercent = 0;
+        
+        try {
+            const priceChangeData = await marketDataService.getPriceChange(symbol);
+            priceChange = priceChangeData.change || 0;
+            priceChangePercent = priceChangeData.changePercent || 0;
+        } catch (changeError) {
+            logger.warn(`Could not fetch price change for ${symbol}: ${changeError.message}`);
+        }
+
+        res.status(200).json({
+            success: true,
+            data: {
+                symbol,
+                price,
+                priceChange,
+                priceChangePercent,
+                timestamp: Date.now()
+            }
+        });
+    } catch (error) {
+        logger.error(`Error fetching market price: ${error.message}`);
+        next(error);
+    }
 };
 
 // Get all market prices
 export const getAllMarketPrices = async (req, res, next) => {
-  try {
-    // Get prices for multiple assets
-    const { symbols } = req.query;
-    let symbolsList = [];
+    try {
+        const { symbols } = req.query;
+        let symbolsList = [];
 
-    if (symbols) {
-      symbolsList = Array.isArray(symbols) ? symbols : symbols.split(',');
-    } else {
-      // Get all trading pairs and fetch prices for them
-      try {
-        const pairs = await marketDataService.getTradingPairs();
-        symbolsList = pairs.map(pair => pair.symbol);
-      } catch (pairsError) {
-        logger.error(`Error fetching trading pairs: ${pairsError.message}`);
-        // Use a default list of common pairs as fallback
-        symbolsList = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'SOL/USDT'];
-      }
-    }
-
-    const prices = await Promise.all(
-      symbolsList.map(async (symbol) => {
-        try {
-          const price = await marketDataService.getPrice(symbol);
-          return {
-            symbol,
-            price,
-            timestamp: Date.now()
-          };
-        } catch (error) {
-          logger.warn(`Error fetching price for ${symbol}: ${error.message}`);
-          return {
-            symbol,
-            price: null,
-            error: error.message
-          };
+        if (symbols) {
+            symbolsList = Array.isArray(symbols) ? symbols : symbols.split(',');
+        } else {
+            try {
+                const pairs = await marketDataService.getTradingPairs();
+                symbolsList = pairs.map(pair => pair.symbol);
+            } catch (pairsError) {
+                logger.error(`Error fetching trading pairs: ${pairsError.message}`);
+                symbolsList = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'SOL/USDT'];
+            }
         }
-      })
-    );
 
-    res.status(200).json({
-      success: true,
-      data: prices.filter(p => p.price !== null)
-    });
-  } catch (error) {
-    logger.error(`Error fetching market prices: ${error.message}`);
-    next(error);
-  }
+        const marketPrices = {};
+
+        await Promise.all(
+            symbolsList.map(async (symbol) => {
+                try {
+                    const price = await marketDataService.getPrice(symbol);
+                    
+                    // Get 24h price change data
+                    let priceChange = 0;
+                    let priceChangePercent = 0;
+                    
+                    try {
+                        const priceChangeData = await marketDataService.getPriceChange(symbol);
+                        priceChange = priceChangeData.change || 0;
+                        priceChangePercent = priceChangeData.changePercent || 0;
+                    } catch (changeError) {
+                        logger.warn(`Could not fetch price change for ${symbol}: ${changeError.message}`);
+                    }
+
+                    if (price !== null) {
+                        marketPrices[symbol] = {
+                            symbol,
+                            price,
+                            priceChange,
+                            priceChangePercent,
+                            timestamp: Date.now()
+                        };
+                    }
+                } catch (error) {
+                    logger.warn(`Error fetching price for ${symbol}: ${error.message}`);
+                }
+            })
+        );
+
+        res.status(200).json({
+            success: true,
+            data: marketPrices
+        });
+    } catch (error) {
+        logger.error(`Error fetching market prices: ${error.message}`);
+        next(error);
+    }
 };
 
 // Get orderbook for a symbol

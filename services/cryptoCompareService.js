@@ -131,54 +131,11 @@ const cryptoCompareService = {
    * @returns {Promise<number>} Price value
    */
   getPrice: async (fromSymbol, toSymbol = 'USD') => {
-    try {
-      const result = await cryptoCompareService.getCurrentPrice(fromSymbol, toSymbol);
-      if (result && result[toSymbol]) {
-        return result[toSymbol];
-      }
-      throw new Error(`Price not available for ${fromSymbol}/${toSymbol}`);
-    } catch (error) {
-      logger.warn(`CryptoCompare getPrice error for ${fromSymbol}/${toSymbol}: ${error.message}`);
-      // Return mock price as fallback instead of throwing
-      return cryptoCompareService.getMockPrice(fromSymbol, toSymbol);
+    const result = await cryptoCompareService.getCurrentPrice(fromSymbol, toSymbol);
+    if (result && result[toSymbol]) {
+      return result[toSymbol];
     }
-  },
-
-  /**
-   * Generate a mock price for a cryptocurrency
-   * @param {string} fromSymbol - From symbol (e.g., BTC)
-   * @param {string} toSymbol - To symbol (e.g., USD)
-   * @returns {number} Mock price
-   */
-  getMockPrice: (fromSymbol, toSymbol = 'USD') => {
-    // Define base prices for common cryptocurrencies
-    const basePrices = {
-      'BTC': 48000,
-      'ETH': 3200,
-      'BNB': 410,
-      'SOL': 100,
-      'XRP': 0.50,
-      'ADA': 0.45,
-      'DOT': 6.8,
-      'DOGE': 0.14,
-      'AVAX': 28,
-      'MATIC': 0.80,
-    };
-    
-    // Get base price or use default
-    const basePrice = basePrices[fromSymbol.toUpperCase()] || 100;
-    
-    // Add some randomness (±1%)
-    const variance = basePrice * 0.01;
-    const randomFactor = (Math.random() * 2 - 1) * variance;
-    
-    // Adjust for different quote currencies if needed
-    let multiplier = 1;
-    if (toSymbol === 'EUR') multiplier = 0.92;
-    else if (toSymbol === 'GBP') multiplier = 0.78;
-    else if (toSymbol === 'JPY') multiplier = 151;
-    
-    return parseFloat((basePrice + randomFactor) * multiplier);
+    throw new Error(`Price not available for ${fromSymbol}/${toSymbol}`);
   },
 
   /**
@@ -188,31 +145,14 @@ const cryptoCompareService = {
    * @returns {Promise<Object>} Price data
    */
   getCurrentPrice: async (fromSymbol, toSymbols) => {
-    try {
-      const toSymbolsStr = Array.isArray(toSymbols)
-        ? toSymbols.join(",")
-        : toSymbols;
+    const toSymbolsStr = Array.isArray(toSymbols)
+      ? toSymbols.join(",")
+      : toSymbols;
 
-      return await cryptoCompareService.executeRequest("price", {
-        fsym: fromSymbol,
-        tsyms: toSymbolsStr,
-      });
-    } catch (error) {
-      logger.warn(`CryptoCompare getCurrentPrice failed for ${fromSymbol}: ${error.message}`);
-      
-      // Create mock response with the same structure as the API would return
-      const response = {};
-      
-      if (Array.isArray(toSymbols)) {
-        toSymbols.forEach(sym => {
-          response[sym] = cryptoCompareService.getMockPrice(fromSymbol, sym);
-        });
-      } else {
-        response[toSymbols] = cryptoCompareService.getMockPrice(fromSymbol, toSymbols);
-      }
-      
-      return response;
-    }
+    return await cryptoCompareService.executeRequest("price", {
+      fsym: fromSymbol,
+      tsyms: toSymbolsStr,
+    });
   },
 
   /**
@@ -327,6 +267,109 @@ const cryptoCompareService = {
       lang: "EN",
       extraParams: "FinancialFreedomBroker",
     });
+  },
+
+  /**
+   * Get historical data with appropriate interval
+   * @param {string} fromSymbol - From symbol (e.g., BTC)
+   * @param {string} toSymbol - To symbol (e.g., USD) 
+   * @param {string} interval - Interval string (e.g., "1h", "1d", "5m")
+   * @param {number} limit - Number of data points
+   * @returns {Promise<Array>} Historical data points
+   */
+  getHistoricalData: async (fromSymbol, toSymbol = 'USD', interval = '1h', limit = 100) => {
+    try {
+      // Extract number and unit from interval (e.g., "1h" -> 1, "h")
+      const match = interval.match(/^(\d+)([mhdwM])$/);
+      if (!match) {
+        throw new Error(`Invalid interval format: ${interval}`);
+      }
+      
+      const [, value, unit] = match;
+      const numValue = parseInt(value, 10);
+      
+      let result;
+      
+      switch(unit) {
+        case 'm': // minutes
+          result = await cryptoCompareService.getHistoricalMinuteData(
+            fromSymbol, 
+            toSymbol, 
+            limit, 
+            numValue // Use the number as aggregate (e.g., 5m = aggregate 5)
+          );
+          break;
+        
+        case 'h': // hours
+          if (numValue === 1) {
+            result = await cryptoCompareService.getHistoricalHourlyData(
+              fromSymbol, 
+              toSymbol, 
+              limit
+            );
+          } else {
+            // For intervals like 4h, use hourly data with aggregation
+            result = await cryptoCompareService.executeRequest("histohour", {
+              fsym: fromSymbol,
+              tsym: toSymbol,
+              limit,
+              aggregate: numValue
+            });
+          }
+          break;
+        
+        case 'd': // days
+          if (numValue === 1) {
+            result = await cryptoCompareService.getHistoricalDailyData(
+              fromSymbol, 
+              toSymbol, 
+              limit
+            );
+          } else {
+            // For intervals like 3d, use daily data with aggregation
+            result = await cryptoCompareService.executeRequest("histoday", {
+              fsym: fromSymbol,
+              tsym: toSymbol,
+              limit,
+              aggregate: numValue
+            });
+          }
+          break;
+        
+        case 'w': // weeks
+          // Use daily data with aggregation
+          result = await cryptoCompareService.executeRequest("histoday", {
+            fsym: fromSymbol,
+            tsym: toSymbol,
+            limit,
+            aggregate: numValue * 7 // Convert weeks to days
+          });
+          break;
+        
+        case 'M': // months
+          // Use daily data with aggregation, approximating a month as 30 days
+          result = await cryptoCompareService.executeRequest("histoday", {
+            fsym: fromSymbol,
+            tsym: toSymbol,
+            limit,
+            aggregate: numValue * 30 // Approximate months
+          });
+          break;
+        
+        default:
+          throw new Error(`Unsupported interval unit: ${unit}`);
+      }
+      
+      if (result && result.Data) {
+        return result.Data;
+      } else {
+        logger.warn(`No historical data returned for ${fromSymbol}/${toSymbol} with interval ${interval}`);
+        return [];
+      }
+    } catch (error) {
+      logger.error(`Error getting historical data for ${fromSymbol}/${toSymbol}:`, error.message);
+      throw error;
+    }
   },
 };
 

@@ -84,6 +84,39 @@ const alphaVantageService = {
       symbol,
     });
   },
+  
+  /**
+   * Get quote data in a standardized format for marketDataService
+   * @param {string} symbol - Stock symbol (e.g., AAPL)
+   * @returns {Promise<Object>} Standardized quote data with price
+   */
+  getQuote: async (symbol) => {
+    try {
+      const quoteData = await alphaVantageService.getStockQuote(symbol);
+      
+      // Check if we got a valid response with "Global Quote"
+      if (quoteData && quoteData["Global Quote"]) {
+        const globalQuote = quoteData["Global Quote"];
+        return {
+          symbol: symbol,
+          price: parseFloat(globalQuote["05. price"]),
+          open: parseFloat(globalQuote["02. open"]),
+          high: parseFloat(globalQuote["03. high"]),
+          low: parseFloat(globalQuote["04. low"]),
+          volume: parseFloat(globalQuote["06. volume"]),
+          latestTradingDay: globalQuote["07. latest trading day"],
+          previousClose: parseFloat(globalQuote["08. previous close"]),
+          change: parseFloat(globalQuote["09. change"]),
+          changePercent: globalQuote["10. change percent"]
+        };
+      }
+      
+      throw new Error(`Invalid response format for symbol ${symbol}`);
+    } catch (error) {
+      logger.error(`Error getting quote for ${symbol}:`, error.message);
+      throw error;
+    }
+  },
 
   /**
    * Get daily time series data for a symbol
@@ -163,6 +196,98 @@ const alphaVantageService = {
    */
   getSectorPerformances: async () => {
     return await alphaVantageService.executeRequest("SECTOR");
+  },
+
+  /**
+   * Get historical data with appropriate interval (unified method)
+   * @param {string} symbol - Symbol (e.g., AAPL, GOLD)
+   * @param {string} toSymbol - Quote currency (e.g., USD) 
+   * @param {string} interval - Interval string (e.g., "1h", "1d", "5m")
+   * @param {number} limit - Number of data points
+   * @returns {Promise<Array>} Historical data points
+   */
+  getHistoricalData: async (symbol, toSymbol = 'USD', interval = '1d', limit = 100) => {
+    try {
+      // Extract number and unit from interval (e.g., "1h" -> 1, "h")
+      const match = interval.match(/^(\d+)([mhdwM])$/);
+      
+      if (!match) {
+        throw new Error(`Invalid interval format: ${interval}`);
+      }
+      
+      const [, value, unit] = match;
+      const numValue = parseInt(value, 10);
+      
+      let result;
+      
+      // Choose appropriate time series based on interval unit
+      switch(unit) {
+        case 'm': // minutes
+          result = await alphaVantageService.getIntradayTimeSeries(symbol, `${numValue}min`, false);
+          break;
+        
+        case 'h': // hours
+          // Alpha Vantage only supports specific intraday intervals
+          if (numValue === 1) {
+            result = await alphaVantageService.getIntradayTimeSeries(symbol, "60min", false);
+          } else {
+            // For other hours, use the closest available interval
+            result = await alphaVantageService.getIntradayTimeSeries(symbol, "60min", false);
+            // Note: we're not implementing aggregation here as it would require custom processing
+          }
+          break;
+        
+        case 'd': // days
+          result = await alphaVantageService.getDailyTimeSeries(symbol, false);
+          break;
+        
+        case 'w': // weeks
+          result = await alphaVantageService.getWeeklyTimeSeries(symbol);
+          break;
+        
+        case 'M': // months
+          result = await alphaVantageService.getMonthlyTimeSeries(symbol);
+          break;
+        
+        default:
+          throw new Error(`Unsupported interval unit: ${unit}`);
+      }
+      
+      // Process the response and extract the time series data
+      let timeSeriesKey = '';
+      
+      // Find the time series key in the response
+      for (const key in result) {
+        if (key.startsWith('Time Series') || key.includes('Time Series')) {
+          timeSeriesKey = key;
+          break;
+        }
+      }
+      
+      if (timeSeriesKey && result[timeSeriesKey]) {
+        const timeSeries = result[timeSeriesKey];
+        const dataPoints = Object.keys(timeSeries).map(date => {
+          const dataPoint = timeSeries[date];
+          return {
+            time: new Date(date).getTime() / 1000, // Convert to UNIX timestamp in seconds
+            open: parseFloat(dataPoint['1. open']),
+            high: parseFloat(dataPoint['2. high']),
+            low: parseFloat(dataPoint['3. low']),
+            close: parseFloat(dataPoint['4. close']),
+            volumefrom: parseFloat(dataPoint['5. volume'] || 0)
+          };
+        });
+        
+        // Sort by time (newest first) and limit results
+        return dataPoints.sort((a, b) => b.time - a.time).slice(0, limit);
+      }
+      
+      logger.warn(`No historical data returned for ${symbol} with interval ${interval}`);
+      return [];
+    } catch (error) {
+      logger.error(`Error getting historical data for ${symbol}:`, error.message);
+      throw error;
+    }
   },
 
   /**
