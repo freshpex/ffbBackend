@@ -190,14 +190,15 @@ export const placeOrder = async (req, res, next) => {
   session.startTransaction();
 
   try {
-    const { symbol, side, type, quantity, price, stopPrice } = req.body;
+    const { symbol, side, type, quantity, price, stopPrice, total } = req.body;
     const userId = req.user._id;
 
+    // Basic validation checks
     if (!symbol || !side || !type || !quantity) {
       throw new ApiError("Missing required order parameters", 400, "validation_error");
     }
 
-    if (quantity <= 0) {
+    if (parseFloat(quantity) <= 0) {
       throw new ApiError("Quantity must be greater than zero", 400, "validation_error");
     }
 
@@ -209,17 +210,24 @@ export const placeOrder = async (req, res, next) => {
       throw new ApiError("Stop price is required for stop orders", 400, "validation_error");
     }
 
-    const currentPrice = await marketDataService.getPrice(symbol);
+    // Parse values from frontend
+    const parsedQuantity = parseFloat(quantity);
+    let parsedPrice = type === "market" ? null : parseFloat(price);
+    let orderTotal = total ? parseFloat(total) : null;
     
-    if (!currentPrice) {
-      throw new ApiError(`Could not determine price for ${symbol}`, 400, "price_unavailable");
+    // Validate orderTotal is a valid number
+    if (isNaN(orderTotal) || orderTotal <= 0) {
+      throw new ApiError(`Invalid order total: ${orderTotal}`, 400, "validation_error");
     }
-
-    const orderPrice = type === "market" ? currentPrice : price;
-    const orderTotal = parseFloat(quantity) * parseFloat(orderPrice);
     
     // Calculate fee
     const fee = (orderTotal * TRADING_FEE_PERCENTAGE) / 100;
+    
+    // Validate fee is a valid number
+    if (isNaN(fee)) {
+      throw new ApiError(`Invalid fee calculation`, 400, "validation_error");
+    }
+    
     const totalCost = side === "buy" ? orderTotal + fee : 0;
 
     if (side === "buy") {
@@ -249,12 +257,12 @@ export const placeOrder = async (req, res, next) => {
       symbol,
       side,
       type,
-      quantity: parseFloat(quantity),
-      price: type !== "market" ? parseFloat(price) : null,
+      quantity: parsedQuantity,
+      price: type !== "market" ? parsedPrice : null,
       stopPrice: (type === "stop" || type === "stop_limit") ? parseFloat(stopPrice) : null,
-      status: type === "market" ? "filled" : "new", // Market orders are filled immediately
-      executedQuantity: type === "market" ? parseFloat(quantity) : 0,
-      executionPrice: type === "market" ? parseFloat(currentPrice) : null,
+      status: type === "market" ? "filled" : "new",
+      executedQuantity: type === "market" ? parsedQuantity : 0,
+      executionPrice: type === "market" ? parsedPrice : null,
       fee,
       total: orderTotal,
       clientOrderId: `order_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
@@ -271,13 +279,13 @@ export const placeOrder = async (req, res, next) => {
         currency: "USD",
         status: "completed",
         method: "system",
-        description: `${side === "buy" ? "Buy" : "Sell"} ${quantity} of ${symbol} at ${currentPrice} USD`,
+        description: `${side === "buy" ? "Buy" : "Sell"} ${parsedQuantity} of ${symbol} at ${parsedPrice} USD`,
         metadata: {
           orderId: newOrder._id,
           symbol,
           side,
-          quantity,
-          price: currentPrice,
+          quantity: parsedQuantity,
+          price: parsedPrice,
           fee
         },
         processedAt: new Date()
@@ -287,6 +295,12 @@ export const placeOrder = async (req, res, next) => {
       
       if (side === "sell") {
         const sellAmount = orderTotal - fee;
+        
+        // Validate sellAmount is a valid number before updating user balance
+        if (isNaN(sellAmount)) {
+          throw new ApiError(`Invalid sell amount calculation`, 400, "validation_error");
+        }
+        
         await User.findByIdAndUpdate(
           userId,
           { $inc: { balance: sellAmount } },

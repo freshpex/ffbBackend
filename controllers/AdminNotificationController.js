@@ -19,13 +19,13 @@ export const getAdminNotifications = async (req, res, next) => {
       query.read = read === "true";
     }
 
-    const total = await Notification.countDocuments(query);
-    const notifications = await Notification.find(query)
+    const total = await AdminNotification.countDocuments(query);
+    const notifications = await AdminNotification.find(query)
       .sort({ createdAt: -1 })
       .skip((parseInt(page) - 1) * parseInt(limit))
       .limit(parseInt(limit));
 
-    const unreadCount = await Notification.countDocuments({
+    const unreadCount = await AdminNotification.countDocuments({
       recipient: req.user._id,
       forAdminOnly: true,
       read: false,

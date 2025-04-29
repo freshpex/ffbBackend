@@ -41,6 +41,11 @@ import {
   deleteNotification,
   createSystemNotification,
   getNotificationStats,
+  getUnreadCount,
+  markAsRead,
+  markAllAsRead,
+  createAdminNotification,
+  createNotification,
 } from "../controllers/AdminNotificationController.js";
 import AdminProfileController from "../controllers/AdminProfileController.js";
 import AdminSettingsController from "../controllers/AdminSettingsController.js";
@@ -467,57 +472,6 @@ router.put(
   asyncHandler(processTransaction),
 );
 
-// === Admin Notification Routes ===
-
-// Get all admin notifications
-router.get(
-  "/notifications",
-  requireAdmin,
-  AdminNotificationController.getAdminNotifications,
-);
-
-// Get notification statistics
-router.get(
-  "/notifications/stats",
-  requireAdmin,
-  asyncHandler(getNotificationStats),
-);
-
-// Mark all notifications as read
-router.put(
-  "/notifications/mark-all-read",
-  requireAdmin,
-  asyncHandler(markAllNotificationsAsRead),
-);
-
-// Create system notification for all admins
-router.post(
-  "/notifications/system",
-  requireAdmin,
-  asyncHandler(createSystemNotification),
-);
-
-// Get notification by ID
-router.get(
-  "/notifications/:id",
-  requireAdmin,
-  asyncHandler(getNotificationById),
-);
-
-// Mark notification as read
-router.put(
-  "/notifications/:id/read",
-  requireAdmin,
-  AdminNotificationController.markAsRead,
-);
-
-// Delete notification
-router.delete(
-  "/notifications/:id",
-  requireAdmin,
-  AdminNotificationController.deleteNotification,
-);
-
 // Admin Profile routes
 router.get("/profile", asyncHandler(AdminProfileController.getAdminProfile));
 router.put("/profile", asyncHandler(AdminProfileController.updateAdminProfile));
@@ -563,24 +517,23 @@ router.post(
 // Notification routes
 router.get(
   "/notifications",
-  requireAdmin,
-  AdminNotificationController.getAdminNotifications,
+  getAdminNotifications,
 );
 router.get(
   "/notifications/unread-count",
   requireAdmin,
-  AdminNotificationController.getUnreadCount,
+  getUnreadCount,
 );
 router.put("/notifications/:id/read", requireAdmin, (req, res) => {
-  AdminNotificationController.markAsRead(req, res);
+  markAsRead(req, res);
 });
 router.put("/notifications/read-all", requireAdmin, (req, res) => {
-  AdminNotificationController.markAllAsRead(req, res);
+  markAllAsRead(req, res);
 });
 router.delete(
   "/notifications/:id",
   requireAdmin,
-  AdminNotificationController.deleteNotification,
+  deleteNotification,
 );
 router.post(
   "/notifications",
@@ -589,7 +542,7 @@ router.post(
     check("title", "Title is required").not().isEmpty(),
     check("message", "Message is required").not().isEmpty(),
   ],
-  AdminNotificationController.createNotification,
+  createNotification,
 );
 
 router.get("/atm-cards/all", ATMCardsController.adminGetAllCards);
