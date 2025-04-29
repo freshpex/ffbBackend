@@ -299,7 +299,7 @@ const createAlertNotification = async (
 ) => {
   try {
     const notification = new Notification({
-      user: userId,
+      recipient: userId,
       type: "price_alert",
       title: `Price Alert: ${alert.symbol}`,
       message: `${alert.symbol} is now ${alert.condition === "above" ? "above" : "below"} your target price of ${alert.price}. Current price: ${currentPrice}`,

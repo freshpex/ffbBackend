@@ -10,10 +10,7 @@ export const getAdminNotifications = async (req, res, next) => {
   try {
     const { page = 1, limit = 10, read } = req.query;
 
-    const query = {
-      recipient: req.user._id,
-      forAdminOnly: true,
-    };
+    const query = {};
 
     if (read !== undefined) {
       query.read = read === "true";
@@ -26,8 +23,6 @@ export const getAdminNotifications = async (req, res, next) => {
       .limit(parseInt(limit));
 
     const unreadCount = await AdminNotification.countDocuments({
-      recipient: req.user._id,
-      forAdminOnly: true,
       read: false,
     });
 
@@ -55,11 +50,7 @@ export const getNotificationById = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const notification = await Notification.findOne({
-      _id: id,
-      recipient: req.user._id,
-      forAdminOnly: true,
-    });
+    const notification = await AdminNotification.findById(id);
 
     if (!notification) {
       throw new ApiError("Notification not found", 404, "not_found");
@@ -80,11 +71,7 @@ export const markNotificationAsRead = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const notification = await Notification.findOne({
-      _id: id,
-      recipient: req.user._id,
-      forAdminOnly: true,
-    });
+    const notification = await AdminNotification.findById(id);
 
     if (!notification) {
       throw new ApiError("Notification not found", 404, "not_found");
@@ -107,7 +94,7 @@ export const markNotificationAsRead = async (req, res, next) => {
 // Mark all notifications as read
 export const markAllNotificationsAsRead = async (req, res, next) => {
   try {
-    const result = await Notification.updateMany(
+    const result = await AdminNotification.updateMany(
       {
         recipient: req.user._id,
         forAdminOnly: true,
@@ -134,17 +121,13 @@ export const deleteNotification = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const notification = await Notification.findOne({
-      _id: id,
-      recipient: req.user._id,
-      forAdminOnly: true,
-    });
+    const notification = await AdminNotification.findById(id);
 
     if (!notification) {
       throw new ApiError("Notification not found", 404, "not_found");
     }
 
-    await Notification.deleteOne({ _id: id });
+    await AdminNotification.deleteOne({ _id: id });
 
     res.status(200).json({
       success: true,
@@ -187,7 +170,7 @@ export const createSystemNotification = async (req, res, next) => {
     // Create notifications for all admins
     const notifications = await Promise.all(
       adminUsers.map((admin) => {
-        const notification = new Notification({
+        const notification = new AdminNotification({
           recipient: admin._id,
           type,
           title,
@@ -218,18 +201,18 @@ export const createSystemNotification = async (req, res, next) => {
 // Get notification statistics
 export const getNotificationStats = async (req, res, next) => {
   try {
-    const totalCount = await Notification.countDocuments({
+    const totalCount = await AdminNotification.countDocuments({
       recipient: req.user._id,
       forAdminOnly: true,
     });
 
-    const unreadCount = await Notification.countDocuments({
+    const unreadCount = await AdminNotification.countDocuments({
       recipient: req.user._id,
       forAdminOnly: true,
       read: false,
     });
 
-    const byType = await Notification.aggregate([
+    const byType = await AdminNotification.aggregate([
       {
         $match: {
           recipient: new mongoose.Types.ObjectId(req.user._id),

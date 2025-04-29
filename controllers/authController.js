@@ -189,6 +189,7 @@ export const googleAuth = async (req, res, next) => {
 
     // Check if user already exists
     let user = await User.findOne({ $or: [{ email }, { uid }] });
+    let isNewUser = false;
 
     if (user) {
       logger.info(
@@ -201,11 +202,13 @@ export const googleAuth = async (req, res, next) => {
       user.phoneNumber = phoneNumber || user.phoneNumber;
       user.profileImage = photoURL || user.profileImage;
       user.loginType = loginType || user.loginType;
+      user.lastLoginAt = new Date();
       user.updatedAt = new Date();
 
       await user.save();
     } else {
       logger.info(`Creating new user from Google authentication: ${email}`);
+      isNewUser = true;
 
       const generatedReferralCode = Math.random()
         .toString(36)
@@ -228,11 +231,29 @@ export const googleAuth = async (req, res, next) => {
         status: "active",
         emailVerified: true,
         balance: 0,
+        lastLoginAt: new Date(),
         createdAt: new Date(),
         updatedAt: new Date(),
       });
 
       await user.save();
+      
+      // If this is a new user, notify admins
+      if (isNewUser) {
+        try {
+          const { createAndBroadcastNotification } = await import('../services/notificationService.js');
+          await createAndBroadcastNotification({
+            title: "New User Registration",
+            message: `New user ${email} has registered via Google auth.`,
+            type: "user",
+            sourceType: "user_registration",
+            link: `/admin/users/${user._id}`,
+          });
+        } catch (notificationError) {
+          logger.error("Failed to create new user notification:", notificationError);
+          // Continue login process even if notification fails
+        }
+      }
     }
 
     // Generate a JWT token
@@ -252,6 +273,46 @@ export const googleAuth = async (req, res, next) => {
       timestamp: new Date(),
     });
     await loginActivity.save();
+    
+    // Check for suspicious login or new device
+    let isSuspiciousLogin = false;
+    let isNewDevice = false;
+    
+    try {
+      // Find previous logins from this user
+      const previousLogins = await LoginActivity.find({
+        userId: user._id,
+        device: req.headers["user-agent"],
+      }).sort({ timestamp: -1 }).limit(2);
+      
+      // If this is the first login from this device
+      isNewDevice = previousLogins.length <= 1;
+      
+      // Simple suspicious login detection (could be enhanced with more sophisticated logic)
+      // For example, comparing with user's typical login locations/times
+      if (previousLogins.length > 0) {
+        const lastLogin = previousLogins[0];
+        const timeSinceLastLogin = Date.now() - lastLogin.timestamp.getTime();
+        
+        // If login happens from a different IP within a short time frame (e.g. 5 minutes)
+        if (lastLogin.ipAddress !== req.ip && timeSinceLastLogin < 300000) { // 5 minutes
+          isSuspiciousLogin = true;
+        }
+      }
+      
+      // Create login notification
+      const { createLoginNotification } = await import('../services/notificationService.js');
+      await createLoginNotification(user, {
+        ipAddress: req.ip,
+        device: req.headers["user-agent"],
+        suspicious: isSuspiciousLogin,
+        newDevice: isNewDevice,
+        location: req.headers["x-forwarded-for"] || req.ip,
+      });
+    } catch (notificationError) {
+      logger.error("Failed to process login notification:", notificationError);
+      // Continue login process even if notification fails
+    }
 
     res.status(200).json({
       success: true,
