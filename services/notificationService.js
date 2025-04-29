@@ -323,6 +323,202 @@ export const createTransactionNotification = async (transaction, user) => {
   }
 };
 
+// Price Alert notification service
+export const createAlertNotification = async (alert, user, currentPrice) => {
+  try {
+    const { _id, symbol, price, condition } = alert;
+
+    // Format the prices for display
+    const formattedTargetPrice = new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD"
+    }).format(price);
+    
+    const formattedCurrentPrice = new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD"
+    }).format(currentPrice);
+
+    // Create user notification for triggered alert
+    const conditionText = condition === "above" ? "risen above" : "fallen below";
+    
+    const notification = await createUserNotification({
+      recipient: user._id,
+      title: `Price Alert: ${symbol} ${conditionText} ${formattedTargetPrice}`,
+      message: `${symbol} has ${conditionText} your target price of ${formattedTargetPrice}. Current price: ${formattedCurrentPrice}`,
+      type: "price_alert",
+      priority: "medium",
+      link: "/dashboard/trading",
+      data: {
+        symbol,
+        alertId: _id,
+        condition,
+        targetPrice: price,
+        currentPrice,
+      }
+    }, true); // Send email notification as well
+
+    return notification;
+  } catch (error) {
+    logger.error("Error creating price alert notification:", error);
+    throw error;
+  }
+};
+
+// Trading Order notification service
+export const createOrderNotification = async (order, user) => {
+  try {
+    const { _id, symbol, side, type, status, quantity, executionPrice, price } = order;
+    
+    // Determine which price to show (execution price for filled orders, target price for others)
+    const displayPrice = executionPrice || price;
+    
+    // Format amounts for display
+    const formattedPrice = displayPrice ? new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD"
+    }).format(displayPrice) : "market price";
+    
+    // Build appropriate notification based on order type and status
+    let title = '';
+    let message = '';
+    
+    if (status === "filled") {
+      title = `Order Executed: ${symbol}`;
+      message = `Your ${side} order for ${quantity} ${symbol} has been executed at ${formattedPrice}.`;
+    } else if (status === "new") {
+      title = `Order Placed: ${symbol}`;
+      message = `Your ${type} ${side} order for ${quantity} ${symbol} at ${formattedPrice} has been placed successfully.`;
+    } else if (status === "canceled") {
+      title = `Order Canceled: ${symbol}`;
+      message = `Your ${side} order for ${quantity} ${symbol} has been canceled.`;
+    } else if (status === "rejected") {
+      title = `Order Rejected: ${symbol}`;
+      message = `Your ${side} order for ${quantity} ${symbol} was rejected. Please contact support for assistance.`;
+    }
+    
+    if (!title || !message) {
+      logger.warn(`Unhandled order status for notification: ${status}`);
+      return null;
+    }
+    
+    // Create notification for user
+    const notification = await createUserNotification({
+      recipient: user._id,
+      title,
+      message,
+      type: "order",
+      priority: status === "rejected" ? "high" : "medium",
+      link: "/dashboard/trading/orders",
+      data: {
+        orderId: _id,
+        symbol,
+        side,
+        type,
+        status,
+        quantity,
+        price: displayPrice
+      }
+    }, status === "filled" || status === "rejected"); // Send email for filled or rejected orders
+    
+    // For large orders, also notify admins
+    if ((quantity * (displayPrice || 0)) > 10000) { // Orders > $10,000
+      await createAndBroadcastNotification({
+        title: `Large ${status === "filled" ? "Executed" : "Placed"} Order`,
+        message: `${user.fullName} has ${status === "filled" ? "executed" : "placed"} a large ${side} order for ${quantity} ${symbol} at ${formattedPrice}.`,
+        type: "trading",
+        sourceId: _id,
+        sourceModel: "Order",
+        sourceType: `order_${side}_${status}`,
+        link: `/admin/transactions`,
+      });
+    }
+
+    return notification;
+  } catch (error) {
+    logger.error("Error creating order notification:", error);
+    throw error;
+  }
+};
+
+// Card notification service
+export const createCardNotification = async (card, user) => {
+  try {
+    const { _id, cardType, status, lastFourDigits } = card;
+    
+    let title = '';
+    let message = '';
+    let adminNotification = null;
+    
+    switch (status) {
+      case 'pending':
+        title = 'Card Request Submitted';
+        message = `Your request for a ${cardType} card has been submitted and is pending approval.`;
+        break;
+      case 'approved':
+        title = 'Card Request Approved';
+        message = `Your request for a ${cardType} card has been approved. The card is being processed.`;
+        break;
+      case 'rejected':
+        title = 'Card Request Rejected';
+        message = `Your request for a ${cardType} card has been rejected. Please contact support for more information.`;
+        break;
+      case 'processing':
+        title = 'Card is Being Processed';
+        message = `Your ${cardType} card is now being processed and will be shipped soon.`;
+        break;
+      case 'shipped':
+        title = 'Card Has Been Shipped';
+        message = `Your ${cardType} card has been shipped and should arrive within 5-7 business days.`;
+        break;
+      case 'active':
+        title = 'Card Activated';
+        message = lastFourDigits 
+          ? `Your ${cardType} card ending in ${lastFourDigits} has been activated and is ready to use.`
+          : `Your ${cardType} card has been activated and is ready to use.`;
+        break;
+      case 'suspended':
+        title = 'Card Suspended';
+        message = lastFourDigits 
+          ? `Your ${cardType} card ending in ${lastFourDigits} has been temporarily suspended.` 
+          : `Your ${cardType} card has been temporarily suspended.`;
+        break;
+      case 'cancelled':
+        title = 'Card Cancelled';
+        message = lastFourDigits 
+          ? `Your ${cardType} card ending in ${lastFourDigits} has been cancelled.`
+          : `Your ${cardType} card has been cancelled.`;
+        break;
+      default:
+        title = 'Card Status Update';
+        message = `Your ${cardType} card status has been updated to: ${status}`;
+    }
+    
+    if (title && message) {
+      const notification = await createUserNotification({
+        recipient: user._id,
+        title,
+        message,
+        type: "card",
+        priority: ["rejected", "suspended", "cancelled"].includes(status) ? "high" : "medium",
+        link: "/dashboard/cards",
+        data: {
+          cardId: _id,
+          cardType,
+          status
+        }
+      }, ["approved", "shipped", "rejected", "suspended"].includes(status)); // Send email for important statuses
+      
+      return notification;
+    }
+    
+    return null;
+  } catch (error) {
+    logger.error("Error creating card notification:", error);
+    throw error;
+  }
+};
+
 /**
  * Create a notification for a regular user
  * @param {Object} notificationData - Notification data
@@ -663,11 +859,12 @@ export default {
   createSupportTicketNotification,
   createCardRequestNotification,
   createTransactionNotification,
+  createAlertNotification,
+  createOrderNotification,
+  createCardNotification,
   createUserNotification,
   createAdminNotification,
   createSystemNotification,
-  broadcastNotification,
-  deleteExpiredNotifications,
   broadcastNotification,
   deleteExpiredNotifications,
   createLoginNotification

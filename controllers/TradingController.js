@@ -5,6 +5,7 @@ import logger from "../middleware/logger.js";
 import { ApiError } from "../middleware/errorHandler.js";
 import marketDataService from "../services/marketDataService.js";
 import Transaction from "../models/Transaction.js";
+import { createOrderNotification } from "../services/notificationService.js";
 
 // Trading fee percentage (default 0.1%)
 const TRADING_FEE_PERCENTAGE = parseFloat(process.env.TRADING_FEE_PERCENTAGE || 0.1);
@@ -230,13 +231,14 @@ export const placeOrder = async (req, res, next) => {
     
     const totalCost = side === "buy" ? orderTotal + fee : 0;
 
+    // Get user for balance check and notification
+    const user = await User.findById(userId).session(session);
+    
+    if (!user) {
+      throw new ApiError("User not found", 404, "user_not_found");
+    }
+
     if (side === "buy") {
-      const user = await User.findById(userId).session(session);
-      
-      if (!user) {
-        throw new ApiError("User not found", 404, "user_not_found");
-      }
-      
       if (user.balance < totalCost) {
         throw new ApiError(
           `Insufficient balance. Required: ${totalCost.toFixed(2)}, Available: ${user.balance.toFixed(2)}`,
@@ -310,6 +312,14 @@ export const placeOrder = async (req, res, next) => {
     }
 
     await session.commitTransaction();
+
+    // Create notification for the user about their order
+    try {
+      await createOrderNotification(newOrder, user);
+    } catch (notificationError) {
+      logger.error("Error creating order notification:", notificationError);
+      // Continue execution even if notification creation fails
+    }
 
     res.status(201).json({
       success: true,

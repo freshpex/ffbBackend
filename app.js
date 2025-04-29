@@ -8,7 +8,6 @@ import path from "path";
 import { dirname } from "path";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { setupPerformanceMonitoring } from "./middleware/performance.js";
-import logger from "./middleware/logger.js";
 
 // Import routes
 import authRouter from "./routes/auth.js";
@@ -35,7 +34,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Setup middleware
-app.use(cors());
+app.use(cors({
+  origin: ['https://ffbf.vercel.app', 'https://ffbroker.vercel.app', 'http://localhost:5173'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH', 'UPDATE'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+}));
 app.use(helmet());
 app.use(compression());
 app.use(express.json());

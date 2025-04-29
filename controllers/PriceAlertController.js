@@ -5,6 +5,7 @@ import logger from "../middleware/logger.js";
 import { ApiError } from "../middleware/errorHandler.js";
 import nodemailer from "nodemailer";
 import mongoose from "mongoose";
+import { createAlertNotification } from "../services/notificationService.js";
 
 // Get user price alerts
 export const getUserPriceAlerts = async (req, res, next) => {
@@ -214,7 +215,7 @@ export const checkPriceAlerts = async (marketData) => {
       active: true,
       triggered: false,
       symbol: { $in: Object.keys(marketData) },
-    });
+    }).populate('user');
 
     if (activeAlerts.length === 0) {
       return { processed: 0, triggered: 0 };
@@ -250,26 +251,18 @@ export const checkPriceAlerts = async (marketData) => {
             await alert.save({ session });
           }
 
-          // Get user for notification
-          const user = await User.findById(alert.user);
-          if (!user) continue;
+          // Skip if no user associated with the alert
+          if (!alert.user) continue;
 
-          // Create in-app notification if enabled
+          // Create in-app notification using the unified notification service
           if (alert.notificationMethods.app) {
-            await createAlertNotification(
-              user._id,
-              alert,
-              currentPrice,
-              session,
-            );
+            try {
+              await createAlertNotification(alert, alert.user, currentPrice);
+            } catch (notificationError) {
+              logger.error("Error creating price alert notification:", notificationError);
+              // Continue execution even if notification creation fails
+            }
           }
-
-          // Send email notification if enabled
-          if (alert.notificationMethods.email) {
-            await sendEmailNotification(user, alert, currentPrice);
-          }
-
-          // SMS notification would be implemented here if enabled
         }
       }
 
@@ -287,84 +280,6 @@ export const checkPriceAlerts = async (marketData) => {
   } catch (error) {
     logger.error("Error checking price alerts:", error);
     throw error;
-  }
-};
-
-// Create in-app notification for triggered alert
-const createAlertNotification = async (
-  userId,
-  alert,
-  currentPrice,
-  session,
-) => {
-  try {
-    const notification = new Notification({
-      recipient: userId,
-      type: "price_alert",
-      title: `Price Alert: ${alert.symbol}`,
-      message: `${alert.symbol} is now ${alert.condition === "above" ? "above" : "below"} your target price of ${alert.price}. Current price: ${currentPrice}`,
-      data: {
-        symbol: alert.symbol,
-        alertId: alert._id,
-        condition: alert.condition,
-        targetPrice: alert.price,
-        currentPrice: currentPrice,
-      },
-      read: false,
-    });
-
-    await notification.save({ session });
-    return notification;
-  } catch (error) {
-    logger.error("Error creating alert notification:", error);
-    throw error;
-  }
-};
-
-// Send email notification for triggered alert
-const sendEmailNotification = async (user, alert, currentPrice) => {
-  try {
-    // Create mail transporter
-    const transporter = nodemailer.createTransport({
-      host: process.env.EMAIL_HOST,
-      port: process.env.EMAIL_PORT,
-      secure: process.env.EMAIL_SECURE === "true",
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASSWORD,
-      },
-    });
-
-    // Email content
-    const mailOptions = {
-      from: `"FFB Alerts" <${process.env.EMAIL_FROM}>`,
-      to: user.email,
-      subject: `Price Alert: ${alert.symbol} ${alert.condition === "above" ? "Above" : "Below"} ${alert.price}`,
-      html: `
-        <div style="font-family: Arial, sans-serif; padding: 20px;">
-          <h2>Price Alert Notification</h2>
-          <p>Hello ${user.firstName},</p>
-          <p>Your price alert has been triggered:</p>
-          <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0;">
-            <p><strong>Symbol:</strong> ${alert.symbol}</p>
-            <p><strong>Condition:</strong> ${alert.condition === "above" ? "Above" : "Below"} ${alert.price}</p>
-            <p><strong>Current Price:</strong> ${currentPrice}</p>
-            <p><strong>Triggered at:</strong> ${new Date().toLocaleString()}</p>
-          </div>
-          <p>Login to your account to view more details or modify your alerts.</p>
-          <p>Thank you for using FFB!</p>
-        </div>
-      `,
-    };
-
-    // Send email
-    const info = await transporter.sendMail(mailOptions);
-    logger.info(`Price alert email sent: ${info.messageId}`);
-    return info;
-  } catch (error) {
-    logger.error("Error sending email notification:", error);
-    // Continue even if email fails
-    return null;
   }
 };
 

@@ -4,6 +4,7 @@ import User from "../models/User.js";
 import logger from "../middleware/logger.js";
 import { ApiError } from "../middleware/errorHandler.js";
 import pkg from "uuid";
+import { createCardRequestNotification } from "../services/notificationService.js";
 const { v4: uuidv4 } = pkg;
 
 // Helper functions for card generation
@@ -142,6 +143,14 @@ export const requestCard = async (req, res, next) => {
     }
 
     await newCard.save();
+
+    // Create notification for both admin and user
+    try {
+      await createCardRequestNotification(newCard, req.user);
+    } catch (notificationError) {
+      logger.error("Error creating card request notification:", notificationError);
+      // Continue execution even if notification creation fails
+    }
 
     res.status(201).json({
       success: true,
@@ -857,7 +866,7 @@ export const adminApproveCardRequest = async (req, res, next) => {
 
     const { id } = req.params;
 
-    const card = await ATMCard.findById(id);
+    const card = await ATMCard.findById(id).populate("user");
 
     if (!card) {
       throw new ApiError("Card not found", 404, "not_found");
@@ -884,7 +893,7 @@ export const adminApproveCardRequest = async (req, res, next) => {
     card.approvedBy = req.user._id;
     card.approvedAt = new Date();
 
-    if (card.cardType === "physical") {
+    if (card.type === "standard-debit" || card.type === "premium-debit" || card.type === "physical") {
       card.status = "processing"; // Physical cards need to be issued
       card.processingMessage =
         "Your card has been approved and is being processed for shipping";
@@ -892,7 +901,13 @@ export const adminApproveCardRequest = async (req, res, next) => {
 
     await card.save();
 
-    // TODO: Send notification to user
+    // Send notification to the user
+    try {
+      await createCardRequestNotification(card, card.user);
+    } catch (notificationError) {
+      logger.error("Error creating card approval notification:", notificationError);
+      // Continue execution even if notification creation fails
+    }
 
     res.status(200).json({
       success: true,
@@ -927,7 +942,7 @@ export const adminRejectCardRequest = async (req, res, next) => {
       );
     }
 
-    const card = await ATMCard.findById(id);
+    const card = await ATMCard.findById(id).populate("user");
 
     if (!card) {
       throw new ApiError("Card not found", 404, "not_found");
@@ -949,7 +964,13 @@ export const adminRejectCardRequest = async (req, res, next) => {
 
     await card.save();
 
-    // TODO: Send notification to user
+    // Send notification to the user
+    try {
+      await createCardRequestNotification(card, card.user);
+    } catch (notificationError) {
+      logger.error("Error creating card rejection notification:", notificationError);
+      // Continue execution even if notification creation fails
+    }
 
     res.status(200).json({
       success: true,
@@ -997,7 +1018,7 @@ export const adminUpdateCardStatus = async (req, res, next) => {
       );
     }
 
-    const card = await ATMCard.findById(id);
+    const card = await ATMCard.findById(id).populate("user");
 
     if (!card) {
       throw new ApiError("Card not found", 404, "not_found");
@@ -1016,7 +1037,13 @@ export const adminUpdateCardStatus = async (req, res, next) => {
 
     await card.save();
 
-    // TODO: Send notification to user
+    // Send notification to the user
+    try {
+      await createCardRequestNotification(card, card.user);
+    } catch (notificationError) {
+      logger.error("Error creating card status update notification:", notificationError);
+      // Continue execution even if notification creation fails
+    }
 
     res.status(200).json({
       success: true,
