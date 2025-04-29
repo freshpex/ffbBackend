@@ -3,6 +3,7 @@ import User from "../models/User.js";
 import mongoose from "mongoose";
 import logger from "../middleware/logger.js";
 import { ApiError } from "../middleware/errorHandler.js";
+import { createTransactionNotification } from "../services/notificationService.js";
 
 // Get all withdrawals for a user
 export const getUserWithdrawals = async (req, res, next) => {
@@ -198,6 +199,14 @@ export const createWithdrawal = async (req, res, next) => {
     });
 
     await feeTransaction.save({ session });
+    
+    // Create notifications
+    try {
+      await createTransactionNotification(withdrawal, user);
+    } catch (notificationError) {
+      logger.error("Error creating withdrawal notification:", notificationError);
+      // Continue execution even if notification creation fails
+    }
 
     await session.commitTransaction();
 

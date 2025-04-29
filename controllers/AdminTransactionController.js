@@ -130,6 +130,13 @@ export const processTransaction = async (req, res, next) => {
 
     await transaction.save({ session });
 
+    // Fetch the user associated with the transaction
+    const user = await User.findById(transaction.user).session(session);
+    
+    if (!user) {
+      throw new ApiError("User not found", 404, "not_found");
+    }
+
     // If approved, update user balance
     if (
       action === "approve" &&
@@ -142,26 +149,47 @@ export const processTransaction = async (req, res, next) => {
           { session, new: true },
         );
 
-        await createTransactionNotification(transaction, req.user);
         logger.info(
           `Admin ${req.user.email} approved deposit of ${Math.abs(transaction.amount)} for user ID ${transaction.user}`,
         );
       } else if (transaction.type === "withdrawal") {
-        await createTransactionNotification(transaction, req.user);
         logger.info(
           `Admin ${req.user.email} approved withdrawal of ${Math.abs(transaction.amount)} for user ID ${transaction.user}`,
         );
       }
-    } else if (action === "reject" && transaction.type === "withdrawal") {
-      await User.findByIdAndUpdate(
-        transaction.user,
-        { $inc: { balance: Math.abs(transaction.amount) } },
-        { session, new: true },
-      );
+      
+      // Create notifications for both successful deposits and withdrawals
+      try {
+        await createTransactionNotification(transaction, user);
+      } catch (notificationError) {
+        logger.error("Error sending transaction approval notification:", notificationError);
+        // Continue execution even if notification fails
+      }
+    } else if (action === "reject") {
+      // If rejecting a withdrawal, refund the amount to user's balance
+      if (transaction.type === "withdrawal") {
+        await User.findByIdAndUpdate(
+          transaction.user,
+          { $inc: { balance: Math.abs(transaction.amount) } },
+          { session, new: true },
+        );
 
-      logger.info(
-        `Admin ${req.user.email} rejected withdrawal and refunded ${Math.abs(transaction.amount)} to user ID ${transaction.user}`,
-      );
+        logger.info(
+          `Admin ${req.user.email} rejected withdrawal and refunded ${Math.abs(transaction.amount)} to user ID ${transaction.user}`,
+        );
+      } else if (transaction.type === "deposit") {
+        logger.info(
+          `Admin ${req.user.email} rejected deposit of ${Math.abs(transaction.amount)} for user ID ${transaction.user}`,
+        );
+      }
+      
+      // Create notifications for rejected transactions (both deposit and withdrawal)
+      try {
+        await createTransactionNotification(transaction, user);
+      } catch (notificationError) {
+        logger.error("Error sending transaction rejection notification:", notificationError);
+        // Continue execution even if notification fails
+      }
     }
 
     await session.commitTransaction();

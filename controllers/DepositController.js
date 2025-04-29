@@ -3,6 +3,7 @@ import User from "../models/User.js";
 import mongoose from "mongoose";
 import logger from "../middleware/logger.js";
 import { ApiError } from "../middleware/errorHandler.js";
+import { createTransactionNotification } from "../services/notificationService.js";
 
 // Get all deposits for a user
 export const getUserDeposits = async (req, res, next) => {
@@ -138,6 +139,14 @@ export const createDeposit = async (req, res, next) => {
     });
 
     await deposit.save({ session });
+    
+    // Send notifications for the deposit
+    try {
+      await createTransactionNotification(deposit, req.user);
+    } catch (notificationError) {
+      // Log notification error but continue with the transaction
+      logger.error("Error creating deposit notification:", notificationError);
+    }
 
     // Commit transaction
     await session.commitTransaction();
@@ -403,6 +412,14 @@ export const adminApproveDeposit = async (req, res, next) => {
     const user = await User.findById(deposit.user).session(session);
     user.balance += deposit.amount;
     await user.save({ session });
+    
+    // Create notifications
+    try {
+      await createTransactionNotification(deposit, user);
+    } catch (notificationError) {
+      logger.error("Error creating deposit approval notification:", notificationError);
+      // Continue execution even if notification creation fails
+    }
 
     // Commit transaction
     await session.commitTransaction();
@@ -461,6 +478,17 @@ export const adminRejectDeposit = async (req, res, next) => {
     deposit.description = `${deposit.description} | Rejected: ${reason}`;
 
     await deposit.save();
+    
+    // Create notifications for the user
+    try {
+      const user = await User.findById(deposit.user);
+      if (user) {
+        await createTransactionNotification(deposit, user);
+      }
+    } catch (notificationError) {
+      logger.error("Error creating deposit rejection notification:", notificationError);
+      // Continue execution even if notification creation fails
+    }
 
     res.status(200).json({
       success: true,

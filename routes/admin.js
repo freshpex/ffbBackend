@@ -49,7 +49,6 @@ import {
 } from "../controllers/AdminNotificationController.js";
 import AdminProfileController from "../controllers/AdminProfileController.js";
 import AdminSettingsController from "../controllers/AdminSettingsController.js";
-import AdminNotificationController from "../controllers/AdminNotificationController.js";
 import { check } from "express-validator";
 
 const router = express.Router();
