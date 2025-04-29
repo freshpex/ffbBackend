@@ -504,7 +504,8 @@ export const getUserPositions = async (req, res, next) => {
         
         // Get current price from market data service
         try {
-          position.currentPrice = await marketDataService.getPrice(position.symbol);
+          const priceData = await marketDataService.getPrice(position.symbol);
+          position.currentPrice = typeof priceData === 'object' ? priceData.price : priceData;
           position.value = position.quantity * position.currentPrice;
           position.profitLoss = position.value - position.totalInvested;
           position.profitLossPercentage = (position.profitLoss / position.totalInvested) * 100;
