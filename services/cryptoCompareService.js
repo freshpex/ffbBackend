@@ -139,8 +139,6 @@ const cryptoCompareService = {
       throw new Error(`Price not available for ${fromSymbol}/${toSymbol}`);
     } catch (error) {
       logger.warn(`CryptoCompare getPrice error for ${fromSymbol}/${toSymbol}: ${error.message}`);
-      // Return mock price as fallback instead of throwing
-      return cryptoCompareService.getMockPrice(fromSymbol, toSymbol);
     }
   },
 
@@ -199,19 +197,6 @@ const cryptoCompareService = {
       });
     } catch (error) {
       logger.warn(`CryptoCompare getCurrentPrice failed for ${fromSymbol}: ${error.message}`);
-      
-      // Create mock response with the same structure as the API would return
-      const response = {};
-      
-      if (Array.isArray(toSymbols)) {
-        toSymbols.forEach(sym => {
-          response[sym] = cryptoCompareService.getMockPrice(fromSymbol, sym);
-        });
-      } else {
-        response[toSymbols] = cryptoCompareService.getMockPrice(fromSymbol, toSymbols);
-      }
-      
-      return response;
     }
   },
 

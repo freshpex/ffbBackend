@@ -50,7 +50,7 @@ const config = {
       apiKey: process.env.FINNHUB_API_KEY || "",
       baseUrl: "https://finnhub.io/api/v1",
     },
-    useMockData: process.env.USE_MOCK_DATA === "true",
+    useMockData: process.env.USE_MOCK_DATA === "false",
   },
 
   // Binance API settings

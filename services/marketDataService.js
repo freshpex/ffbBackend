@@ -30,13 +30,6 @@ class MarketDataService {
         return this.prices[symbol];
       }
 
-      if (this.mockData) {
-        const mockPrice = this.getMockPrice(symbol);
-        this.prices[symbol] = mockPrice;
-        this.lastUpdated[symbol] = now;
-        return mockPrice;
-      }
-
       // Try to get price from different sources
       let price = null;
       
@@ -80,12 +73,6 @@ class MarketDataService {
         } catch (error) {
           logger.warn(`Alpha Vantage price fetch failed for ${symbol}: ${error.message}`);
         }
-      }
-
-      // If all API calls fail, fall back to mock data
-      if (!price) {
-        price = this.getMockPrice(symbol);
-        logger.info(`Using fallback mock price for ${symbol}: ${price}`);
       }
 
       this.prices[symbol] = price;

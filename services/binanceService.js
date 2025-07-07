@@ -141,15 +141,7 @@ const binanceService = {
       const formattedSymbol = symbol.replace('/', '');
       return await binanceService.makePublicRequest("/api/v3/ticker/price", { symbol: formattedSymbol });
     } catch (error) {
-      // Return a mock price as fallback
       logger.warn(`Using fallback mock price for ${symbol}: ${error.message}`);
-      
-      // Generate more realistic mock prices based on the symbol
-      let mockPrice;
-      if (symbol.includes('BTC')) mockPrice = Math.random() * 1000 + 45000;
-      else if (symbol.includes('ETH')) mockPrice = Math.random() * 100 + 2900;
-      else if (symbol.includes('BNB')) mockPrice = Math.random() * 20 + 380;
-      else mockPrice = Math.random() * 10 + 1;
       
       return {
         symbol: symbol.replace('/', ''),

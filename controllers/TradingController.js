@@ -20,25 +20,8 @@ export const getMarketPrice = async (req, res, next) => {
 
     // Get current price from market data service using the fixed method
     const price = await marketDataService.getPrice(symbol);
-
-    if (price === null || price === undefined) {
-      logger.warn(`Price not available for ${symbol}, returning fallback price`);
-      // Provide a fallback price rather than returning an error
-      const fallbackPrice = symbol.includes('BTC') ? 48000 : 
-                           (symbol.includes('ETH') ? 3200 : 
-                           (symbol.includes('BNB') ? 410 : 100));
-      
-      res.status(200).json({
-        success: true,
-        data: {
-          symbol,
-          price: fallbackPrice,
-          timestamp: Date.now(),
-          isFallback: true
-        }
-      });
-      return;
-    }
+    console.log(`Fetched price for ${symbol}: ${price}`);
+    logger.info(`Fetched price for ${symbol}: ${price}`);
 
     res.status(200).json({
       success: true,
@@ -78,6 +61,8 @@ export const getAllMarketPrices = async (req, res, next) => {
       symbolsList.map(async (symbol) => {
         try {
           const price = await marketDataService.getPrice(symbol);
+          console.log(`Fetched price for ${symbol}: ${price}`);
+          logger.info(`Fetched price for ${symbol}: ${price}`);
           if (price !== null) {
             marketPrices[symbol] = {
               symbol,

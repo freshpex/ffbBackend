@@ -11,8 +11,8 @@ router.use(verifyToken);
 // Market data endpoints
 router.get("/market/price", asyncHandler(TradingController.getMarketPrice));
 router.get("/market/prices", asyncHandler(TradingController.getAllMarketPrices));
-router.get("/market/orderbook/:baseAsset/:quoteAsset", asyncHandler(TradingController.getOrderbook)); // Support path params
-router.get("/market/orderbook", asyncHandler(TradingController.getOrderbook)); // Keep query param version for backward compatibility
+router.get("/market/orderbook/:baseAsset/:quoteAsset", asyncHandler(TradingController.getOrderbook));
+router.get("/market/orderbook", asyncHandler(TradingController.getOrderbook));
 router.get("/market/candlesticks", asyncHandler(TradingController.getCandlesticks));
 router.get("/market/pairs", asyncHandler(TradingController.getTradingPairs));
 router.get("/market/trades", asyncHandler(TradingController.getRecentTrades));
