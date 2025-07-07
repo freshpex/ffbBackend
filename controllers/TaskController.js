@@ -10,15 +10,28 @@ import { ApiError } from "../middleware/errorHandler.js";
 // Helper function to create notifications
 const createNotification = async (userId, title, message, type, metadata = {}, session) => {
   const notification = new Notification({
-    user: userId,
+    recipient: userId,  // Changed from user to recipient
     title,
     message,
-    type,
-    metadata,
+    type: mapNotificationType(type), // Map custom types to valid enum types
+    data: metadata,     // Changed from metadata to data
     read: false,
   });
   
   return session ? notification.save({ session }) : notification.save();
+};
+
+// Map task notification types to valid notification types
+const mapNotificationType = (taskType) => {
+  const typeMap = {
+    'task_started': 'info',
+    'task_completed': 'success',
+    'reward_claimed': 'success',
+    'task_expired': 'warning',
+    'task_failed': 'error'
+  };
+  
+  return typeMap[taskType] || 'info';  // Default to 'info' if type not found
 };
 
 // Default tasks that are available in the system
