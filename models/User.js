@@ -181,6 +181,27 @@ const userSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
     },
+    referralStats: {
+      totalEarnings: {
+        type: Number,
+        default: 0
+      },
+      totalReferrals: {
+        type: Number,
+        default: 0
+      },
+      activeReferrals: {
+        type: Number,
+        default: 0
+      },
+      pendingCommissions: {
+        type: Number,
+        default: 0
+      },
+      lastCommissionDate: {
+        type: Date
+      }
+    },
     loginAttempts: {
       type: Number,
       default: 0,

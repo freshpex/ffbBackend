@@ -8,6 +8,7 @@ import {
   completeReferral,
   getReferralProgram,
   generateReferralLink,
+  getCommissionHistory,
 } from "../controllers/ReferralController.js";
 
 const router = express.Router();
@@ -20,6 +21,9 @@ router.use(verifyToken);
 
 // Get current user's referral code
 router.get("/code", asyncHandler(getReferralCode));
+
+// Get commission history
+router.get("/commissions", asyncHandler(getCommissionHistory));
 
 // Generate referral link
 router.post("/generate-link", asyncHandler(generateReferralLink));

@@ -5,6 +5,7 @@ import logger from "../middleware/logger.js";
 import { ApiError } from "../middleware/errorHandler.js";
 import marketDataService from "../services/marketDataService.js";
 import Transaction from "../models/Transaction.js";
+import { processTaskEvent } from "./TaskController.js"; // Import the task event processor
 
 // Trading fee percentage (default 0.1%)
 const TRADING_FEE_PERCENTAGE = parseFloat(process.env.TRADING_FEE_PERCENTAGE || 0.1);
@@ -295,6 +296,37 @@ export const placeOrder = async (req, res, next) => {
     }
 
     await session.commitTransaction();
+
+    // Process task events after successful order placement
+    try {
+      await processTaskEvent(userId, "order_placed", {
+        orderId: newOrder._id,
+        symbol,
+        type,
+        side,
+        quantity: parseFloat(quantity),
+        amount: orderTotal,
+        fee,
+        isMarket: type === "market",
+        isFilled: type === "market"
+      });
+      
+      // For market orders, also trigger order_filled event
+      if (type === "market") {
+        await processTaskEvent(userId, "order_filled", {
+          orderId: newOrder._id,
+          symbol,
+          side,
+          quantity: parseFloat(quantity),
+          amount: orderTotal,
+          fee
+        });
+      }
+      
+    } catch (eventError) {
+      // Just log the error but don't affect the response
+      logger.error(`Error processing task events for order: ${eventError.message}`);
+    }
 
     res.status(201).json({
       success: true,

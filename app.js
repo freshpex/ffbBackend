@@ -29,6 +29,7 @@ import marketNewsRouter from "./routes/marketNews.js";
 import adminAnalyticsRouter from "./routes/adminAnalytics.js";
 import tradingRouter from "./routes/trading.js";
 import visitorRouter from "./routes/visitors.js";
+import tasksRouter from "./routes/tasks.js";
 
 // Initialize Express app
 const app = express();
@@ -75,6 +76,7 @@ app.use("/api/market-news", marketNewsRouter);
 app.use("/api/admin/analytics", adminAnalyticsRouter);
 app.use("/api/trading", tradingRouter);
 app.use("/api/tracking", visitorRouter);
+app.use("/api/tasks", tasksRouter);
 
 // Error handling middleware
 app.use(errorHandler);

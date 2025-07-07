@@ -1,10 +1,25 @@
 import Referral from "../models/Referral.js";
 import User from "../models/User.js";
 import Transaction from "../models/Transaction.js";
+import Notification from "../models/Notification.js";
 import mongoose from "mongoose";
 import crypto from "crypto";
 import logger from "../middleware/logger.js";
 import { ApiError } from "../middleware/errorHandler.js";
+
+// Helper function to create notifications
+const createNotification = async (userId, title, message, type, metadata = {}, session) => {
+  const notification = new Notification({
+    user: userId,
+    title,
+    message,
+    type,
+    metadata,
+    read: false,
+  });
+  
+  return session ? notification.save({ session }) : notification.save();
+};
 
 // Get current user's referral code
 export const getReferralCode = async (req, res, next) => {
@@ -219,6 +234,21 @@ export const completeReferral = async (req, res, next) => {
     // Credit referrer with the bonus
     const referrer = referral.referrer;
     referrer.balance += referral.rewards.referrerBonus;
+    
+    // Update referrer's total commission earnings
+    if (!referrer.referralStats) {
+      referrer.referralStats = {
+        totalEarnings: referral.rewards.referrerBonus,
+        totalReferrals: 1,
+        activeReferrals: 1,
+        pendingCommissions: 0
+      };
+    } else {
+      referrer.referralStats.totalEarnings += referral.rewards.referrerBonus;
+      referrer.referralStats.totalReferrals += 1;
+      referrer.referralStats.activeReferrals += 1;
+    }
+    
     await referrer.save({ session });
 
     // Create transaction record for referrer
@@ -229,9 +259,15 @@ export const completeReferral = async (req, res, next) => {
       currency: referral.rewards.currency,
       status: "completed",
       method: "referral",
-      description: `Referral bonus for referring ${referral.referee.email}`,
+      description: `Referral commission for referring ${referral.referee.email}`,
       reference: referral._id.toString(),
       processedAt: new Date(),
+      metadata: {
+        referralId: referral._id,
+        refereeId: referral.referee._id,
+        refereeEmail: referral.referee.email,
+        commissionType: "signup_bonus"
+      }
     });
 
     await referrerTransaction.save({ session });
@@ -252,9 +288,36 @@ export const completeReferral = async (req, res, next) => {
       description: "Welcome bonus from referral",
       reference: referral._id.toString(),
       processedAt: new Date(),
+      metadata: {
+        referralId: referral._id,
+        referrerId: referral.referrer._id,
+        referrerEmail: referral.referrer.email,
+        bonusType: "welcome_bonus"
+      }
     });
 
     await refereeTransaction.save({ session });
+
+    // Create a notification for both users
+    // For the referrer
+    await createNotification(
+      referrer._id,
+      "Referral Bonus Received",
+      `You've earned $${referral.rewards.referrerBonus} for referring ${referee.email}`,
+      "referral_bonus",
+      { referralId: referral._id.toString() },
+      session
+    );
+
+    // For the referee
+    await createNotification(
+      referee._id,
+      "Welcome Bonus Received",
+      `You've received $${referral.rewards.refereeBonus} as a welcome bonus from your referral`,
+      "welcome_bonus",
+      { referralId: referral._id.toString() },
+      session
+    );
 
     await session.commitTransaction();
 
@@ -269,6 +332,211 @@ export const completeReferral = async (req, res, next) => {
     next(error);
   } finally {
     session.endSession();
+  }
+};
+
+// Process commission for referred user's activity
+export const processReferralCommission = async (user, transactionAmount, transactionType, transactionId) => {
+  try {
+    // Skip if no referrer
+    if (!user.referredBy) {
+      return null;
+    }
+
+    // Only process for certain transaction types
+    if (!["deposit", "trade"].includes(transactionType)) {
+      return null;
+    }
+
+    // Find the referrer
+    const referrer = await User.findById(user.referredBy);
+    if (!referrer) {
+      logger.error("Referrer not found for user", user._id);
+      return null;
+    }
+
+    // Find the referral
+    const referral = await Referral.findOne({
+      referrer: referrer._id,
+      referee: user._id,
+      status: "completed"
+    });
+
+    if (!referral) {
+      logger.error("No completed referral found for user", user._id);
+      return null;
+    }
+
+    // Calculate commission based on transaction type
+    let commissionRate = 0;
+    let commissionType = "";
+    
+    switch (transactionType) {
+      case "deposit":
+        commissionRate = 0.05; // 5% commission on deposits
+        commissionType = "deposit_commission";
+        break;
+      case "trade":
+        commissionRate = 0.02; // 2% commission on trading
+        commissionType = "trade_commission";
+        break;
+    }
+
+    // Calculate commission amount
+    const commissionAmount = transactionAmount * commissionRate;
+    
+    if (commissionAmount <= 0) {
+      return null;
+    }
+
+    // Start a session for transaction
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      // Update referrer's balance
+      referrer.balance += commissionAmount;
+      
+      // Update referrer's referral stats
+      if (!referrer.referralStats) {
+        referrer.referralStats = {
+          totalEarnings: commissionAmount,
+          totalReferrals: 1,
+          activeReferrals: 1,
+          pendingCommissions: 0
+        };
+      } else {
+        referrer.referralStats.totalEarnings += commissionAmount;
+      }
+      
+      await referrer.save({ session });
+
+      // Create transaction record for the commission
+      const transaction = new Transaction({
+        user: referrer._id,
+        type: "commission",
+        amount: commissionAmount,
+        currency: "USD",
+        status: "completed",
+        method: "referral",
+        description: `${commissionRate * 100}% commission from ${user.email}'s ${transactionType}`,
+        reference: transactionId.toString(),
+        processedAt: new Date(),
+        metadata: {
+          referralId: referral._id,
+          refereeId: user._id,
+          refereeEmail: user.email,
+          commissionType,
+          baseTransactionAmount: transactionAmount,
+          commissionRate
+        }
+      });
+
+      await transaction.save({ session });
+
+      // Create notification for the referrer
+      await createNotification(
+        referrer._id,
+        "Commission Earned",
+        `You've earned $${commissionAmount.toFixed(2)} commission from ${user.email}'s ${transactionType}`,
+        "referral_commission",
+        { 
+          referralId: referral._id.toString(),
+          transactionId: transactionId.toString(),
+          commissionType
+        },
+        session
+      );
+
+      await session.commitTransaction();
+      
+      return {
+        success: true,
+        commissionAmount,
+        referrerId: referrer._id,
+        transactionId: transaction._id
+      };
+    } catch (error) {
+      await session.abortTransaction();
+      logger.error("Error processing referral commission:", error);
+      return null;
+    } finally {
+      session.endSession();
+    }
+  } catch (error) {
+    logger.error("Error in processReferralCommission:", error);
+    return null;
+  }
+};
+
+// Get commission history for the current user
+export const getCommissionHistory = async (req, res, next) => {
+  try {
+    const { page = 1, limit = 10, startDate, endDate, status } = req.query;
+    
+    const query = {
+      user: req.user._id,
+      type: { $in: ["bonus", "commission"] },
+      method: "referral"
+    };
+    
+    // Apply date filter if provided
+    if (startDate || endDate) {
+      query.createdAt = {};
+      if (startDate) {
+        query.createdAt.$gte = new Date(startDate);
+      }
+      if (endDate) {
+        query.createdAt.$lte = new Date(endDate);
+      }
+    }
+    
+    // Apply status filter if provided
+    if (status) {
+      query.status = status;
+    }
+    
+    // Count total documents
+    const total = await Transaction.countDocuments(query);
+    
+    // Fetch paginated transactions
+    const transactions = await Transaction.find(query)
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(parseInt(limit))
+      .populate({
+        path: "metadata.refereeId",
+        select: "email firstName lastName",
+        model: "User"
+      });
+    
+    // Calculate total earnings from these transactions
+    const totalEarnings = transactions.reduce((sum, transaction) => {
+      return sum + transaction.amount;
+    }, 0);
+    
+    // Get user's referral stats
+    const user = await User.findById(req.user._id, "referralStats");
+    
+    res.status(200).json({
+      success: true,
+      data: {
+        commissions: transactions,
+        stats: {
+          totalEarnings,
+          ...user.referralStats,
+        },
+        pagination: {
+          totalItems: total,
+          totalPages: Math.ceil(total / limit),
+          currentPage: parseInt(page),
+          itemsPerPage: parseInt(limit),
+        }
+      }
+    });
+  } catch (error) {
+    logger.error("Error fetching commission history:", error);
+    next(error);
   }
 };
 
@@ -411,4 +679,6 @@ export default {
   completeReferral,
   getReferralProgram,
   generateReferralLink,
+  processReferralCommission,
+  getCommissionHistory,
 };

@@ -3,6 +3,7 @@ import User from "../models/User.js";
 import mongoose from "mongoose";
 import logger from "../middleware/logger.js";
 import { ApiError } from "../middleware/errorHandler.js";
+import { processTaskEvent } from "./TaskController.js"; // Import the task event processor
 
 // Get all deposits for a user
 export const getUserDeposits = async (req, res, next) => {
@@ -141,6 +142,20 @@ export const createDeposit = async (req, res, next) => {
 
     // Commit transaction
     await session.commitTransaction();
+
+    // Process task events after successful deposit creation
+    try {
+      await processTaskEvent(req.user._id, "deposit_made", {
+        depositId: deposit._id,
+        amount: parseFloat(amount),
+        currency,
+        method,
+        status: "pending"
+      });
+    } catch (eventError) {
+      // Log the error but don't affect the response
+      logger.error(`Error processing task events for deposit: ${eventError.message}`);
+    }
 
     res.status(201).json({
       success: true,
@@ -406,6 +421,20 @@ export const adminApproveDeposit = async (req, res, next) => {
 
     // Commit transaction
     await session.commitTransaction();
+
+    // Process task events after deposit approval
+    try {
+      await processTaskEvent(deposit.user, "deposit_approved", {
+        depositId: deposit._id,
+        amount: deposit.amount,
+        currency: deposit.currency,
+        method: deposit.method,
+        status: "completed"
+      });
+    } catch (eventError) {
+      // Log the error but don't affect the response
+      logger.error(`Error processing task events for deposit approval: ${eventError.message}`);
+    }
 
     res.status(200).json({
       success: true,
