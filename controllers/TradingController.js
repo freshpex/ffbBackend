@@ -5,87 +5,100 @@ import logger from "../middleware/logger.js";
 import { ApiError } from "../middleware/errorHandler.js";
 import marketDataService from "../services/marketDataService.js";
 import Transaction from "../models/Transaction.js";
-import { createOrderNotification } from "../services/notificationService.js";
 
 // Trading fee percentage (default 0.1%)
 const TRADING_FEE_PERCENTAGE = parseFloat(process.env.TRADING_FEE_PERCENTAGE || 0.1);
 
 // Get market price for a symbol
 export const getMarketPrice = async (req, res, next) => {
-    try {
-        const { symbol } = req.query;
+  try {
+    const { symbol } = req.query;
 
-        if (!symbol) {
-            throw new ApiError("Symbol is required", 400, "invalid_request");
-        }
-
-        const priceData = await marketDataService.getPrice(symbol);
-        
-        if (!priceData) {
-            throw new ApiError(`Could not fetch price for ${symbol}`, 404, "price_unavailable");
-        }
-
-        res.status(200).json({
-            success: true,
-            data: {
-                symbol: priceData.symbol,
-                price: priceData.price,
-                priceChange: priceData.change,
-                priceChangePercent: priceData.changePercent,
-                direction: priceData.direction,
-                timestamp: priceData.lastUpdated || Date.now()
-            }
-        });
-    } catch (error) {
-        logger.error(`Error fetching market price: ${error.message}`);
-        next(error);
+    if (!symbol) {
+      throw new ApiError("Symbol is required", 400, "invalid_request");
     }
+
+    // Get current price from market data service using the fixed method
+    const price = await marketDataService.getPrice(symbol);
+
+    if (price === null || price === undefined) {
+      logger.warn(`Price not available for ${symbol}, returning fallback price`);
+      // Provide a fallback price rather than returning an error
+      const fallbackPrice = symbol.includes('BTC') ? 48000 : 
+                           (symbol.includes('ETH') ? 3200 : 
+                           (symbol.includes('BNB') ? 410 : 100));
+      
+      res.status(200).json({
+        success: true,
+        data: {
+          symbol,
+          price: fallbackPrice,
+          timestamp: Date.now(),
+          isFallback: true
+        }
+      });
+      return;
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        symbol,
+        price,
+        timestamp: Date.now()
+      }
+    });
+  } catch (error) {
+    logger.error(`Error fetching market price: ${error.message}`);
+    next(error);
+  }
 };
 
 // Get all market prices
 export const getAllMarketPrices = async (req, res, next) => {
-    try {
-        const { symbols } = req.query;
-        let symbolsList = [];
+  try {
+    const { symbols } = req.query;
+    let symbolsList = [];
 
-        if (symbols) {
-            symbolsList = Array.isArray(symbols) ? symbols : symbols.split(',');
-        } else {
-            try {
-                const pairs = await marketDataService.getTradingPairs();
-                symbolsList = pairs.map(pair => pair.symbol);
-            } catch (pairsError) {
-                logger.error(`Error fetching trading pairs: ${pairsError.message}`);
-                symbolsList = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'SOL/USDT'];
-            }
-        }
-
-        const marketPrices = {};
-
-        // Use the new getPrices method to get price data for all symbols at once
-        const pricesData = await marketDataService.getPrices(symbolsList);
-        
-        pricesData.forEach(priceData => {
-            if (priceData && priceData.symbol) {
-                marketPrices[priceData.symbol] = {
-                    symbol: priceData.symbol,
-                    price: priceData.price,
-                    priceChange: priceData.change,
-                    priceChangePercent: priceData.changePercent,
-                    direction: priceData.direction,
-                    timestamp: priceData.lastUpdated || Date.now()
-                };
-            }
-        });
-
-        res.status(200).json({
-            success: true,
-            data: marketPrices
-        });
-    } catch (error) {
-        logger.error(`Error fetching market prices: ${error.message}`);
-        next(error);
+    if (symbols) {
+      symbolsList = Array.isArray(symbols) ? symbols : symbols.split(',');
+    } else {
+      try {
+        const pairs = await marketDataService.getTradingPairs();
+        symbolsList = pairs.map(pair => pair.symbol);
+      } catch (pairsError) {
+        logger.error(`Error fetching trading pairs: ${pairsError.message}`);
+        symbolsList = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'SOL/USDT'];
+      }
     }
+
+    const marketPrices = {};
+
+    await Promise.all(
+      symbolsList.map(async (symbol) => {
+        try {
+          const price = await marketDataService.getPrice(symbol);
+          if (price !== null) {
+            marketPrices[symbol] = {
+              symbol,
+              price,
+              timestamp: Date.now()
+            };
+          }
+        } catch (error) {
+          logger.warn(`Error fetching price for ${symbol}: ${error.message}`);
+        }
+      })
+    );
+
+    res.status(200).json({
+      success: true,
+      data: marketPrices
+    });
+  } catch (error) {
+    logger.error(`Error fetching market prices: ${error.message}`);
+    next(error);
+  }
 };
 
 // Get orderbook for a symbol
@@ -191,15 +204,14 @@ export const placeOrder = async (req, res, next) => {
   session.startTransaction();
 
   try {
-    const { symbol, side, type, quantity, price, stopPrice, total } = req.body;
+    const { symbol, side, type, quantity, price, stopPrice } = req.body;
     const userId = req.user._id;
 
-    // Basic validation checks
     if (!symbol || !side || !type || !quantity) {
       throw new ApiError("Missing required order parameters", 400, "validation_error");
     }
 
-    if (parseFloat(quantity) <= 0) {
+    if (quantity <= 0) {
       throw new ApiError("Quantity must be greater than zero", 400, "validation_error");
     }
 
@@ -211,34 +223,26 @@ export const placeOrder = async (req, res, next) => {
       throw new ApiError("Stop price is required for stop orders", 400, "validation_error");
     }
 
-    // Parse values from frontend
-    const parsedQuantity = parseFloat(quantity);
-    let parsedPrice = type === "market" ? null : parseFloat(price);
-    let orderTotal = total ? parseFloat(total) : null;
+    const currentPrice = await marketDataService.getPrice(symbol);
     
-    // Validate orderTotal is a valid number
-    if (isNaN(orderTotal) || orderTotal <= 0) {
-      throw new ApiError(`Invalid order total: ${orderTotal}`, 400, "validation_error");
+    if (!currentPrice) {
+      throw new ApiError(`Could not determine price for ${symbol}`, 400, "price_unavailable");
     }
+
+    const orderPrice = type === "market" ? currentPrice : price;
+    const orderTotal = parseFloat(quantity) * parseFloat(orderPrice);
     
     // Calculate fee
     const fee = (orderTotal * TRADING_FEE_PERCENTAGE) / 100;
-    
-    // Validate fee is a valid number
-    if (isNaN(fee)) {
-      throw new ApiError(`Invalid fee calculation`, 400, "validation_error");
-    }
-    
     const totalCost = side === "buy" ? orderTotal + fee : 0;
 
-    // Get user for balance check and notification
-    const user = await User.findById(userId).session(session);
-    
-    if (!user) {
-      throw new ApiError("User not found", 404, "user_not_found");
-    }
-
     if (side === "buy") {
+      const user = await User.findById(userId).session(session);
+      
+      if (!user) {
+        throw new ApiError("User not found", 404, "user_not_found");
+      }
+      
       if (user.balance < totalCost) {
         throw new ApiError(
           `Insufficient balance. Required: ${totalCost.toFixed(2)}, Available: ${user.balance.toFixed(2)}`,
@@ -259,12 +263,12 @@ export const placeOrder = async (req, res, next) => {
       symbol,
       side,
       type,
-      quantity: parsedQuantity,
-      price: type !== "market" ? parsedPrice : null,
+      quantity: parseFloat(quantity),
+      price: type !== "market" ? parseFloat(price) : null,
       stopPrice: (type === "stop" || type === "stop_limit") ? parseFloat(stopPrice) : null,
-      status: type === "market" ? "filled" : "new",
-      executedQuantity: type === "market" ? parsedQuantity : 0,
-      executionPrice: type === "market" ? parsedPrice : null,
+      status: type === "market" ? "filled" : "new", // Market orders are filled immediately
+      executedQuantity: type === "market" ? parseFloat(quantity) : 0,
+      executionPrice: type === "market" ? parseFloat(currentPrice) : null,
       fee,
       total: orderTotal,
       clientOrderId: `order_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
@@ -281,13 +285,13 @@ export const placeOrder = async (req, res, next) => {
         currency: "USD",
         status: "completed",
         method: "system",
-        description: `${side === "buy" ? "Buy" : "Sell"} ${parsedQuantity} of ${symbol} at ${parsedPrice} USD`,
+        description: `${side === "buy" ? "Buy" : "Sell"} ${quantity} of ${symbol} at ${currentPrice} USD`,
         metadata: {
           orderId: newOrder._id,
           symbol,
           side,
-          quantity: parsedQuantity,
-          price: parsedPrice,
+          quantity,
+          price: currentPrice,
           fee
         },
         processedAt: new Date()
@@ -297,12 +301,6 @@ export const placeOrder = async (req, res, next) => {
       
       if (side === "sell") {
         const sellAmount = orderTotal - fee;
-        
-        // Validate sellAmount is a valid number before updating user balance
-        if (isNaN(sellAmount)) {
-          throw new ApiError(`Invalid sell amount calculation`, 400, "validation_error");
-        }
-        
         await User.findByIdAndUpdate(
           userId,
           { $inc: { balance: sellAmount } },
@@ -312,14 +310,6 @@ export const placeOrder = async (req, res, next) => {
     }
 
     await session.commitTransaction();
-
-    // Create notification for the user about their order
-    try {
-      await createOrderNotification(newOrder, user);
-    } catch (notificationError) {
-      logger.error("Error creating order notification:", notificationError);
-      // Continue execution even if notification creation fails
-    }
 
     res.status(201).json({
       success: true,
@@ -514,8 +504,7 @@ export const getUserPositions = async (req, res, next) => {
         
         // Get current price from market data service
         try {
-          const priceData = await marketDataService.getPrice(position.symbol);
-          position.currentPrice = typeof priceData === 'object' ? priceData.price : priceData;
+          position.currentPrice = await marketDataService.getPrice(position.symbol);
           position.value = position.quantity * position.currentPrice;
           position.profitLoss = position.value - position.totalInvested;
           position.profitLossPercentage = (position.profitLoss / position.totalInvested) * 100;

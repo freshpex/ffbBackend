@@ -9,48 +9,8 @@ class MarketDataService {
     this.mockData = config.marketData?.useMockData || false;
     this.usingExchangeAPI = config.binance?.apiKey && config.binance.apiKey !== '';
     this.prices = {};
-    this.previousPrices = {};
     this.lastUpdated = {};
     this.updateInterval = 30000; // 30 seconds cache time
-    
-    // Fallback and retry configuration
-    this.maxRetries = 2; // Number of retries per provider
-    this.retryDelay = 1000; // Base delay in ms between retries
-    this.providers = {
-      crypto: ['cryptoCompare', 'binance', 'alphaVantage'],
-      stock: ['alphaVantage', 'cryptoCompare'] // Some financial APIs provide stock data as well
-    };
-  }
-
-  /**
-   * Retry a function with exponential backoff
-   * @param {Function} fn - Function to retry
-   * @param {number} retries - Number of retries
-   * @param {number} delay - Delay between retries in ms 
-   * @param {string} providerName - Name of the provider being tried
-   * @param {string} symbol - Symbol being fetched
-   * @returns {Promise<any>} - Result of the function or null if all retries fail
-   */
-  async retryOperation(fn, retries, delay, providerName, symbol) {
-    try {
-      return await fn();
-    } catch (error) {
-      if (retries <= 0) {
-        logger.warn(`All retries failed for ${providerName} when fetching ${symbol}`);
-        return null;
-      }
-      
-      logger.info(`Retry attempt for ${providerName} (${symbol}), remaining attempts: ${retries}`);
-      await new Promise(resolve => setTimeout(resolve, delay));
-      
-      return this.retryOperation(
-        fn, 
-        retries - 1, 
-        delay * 2, // Exponential backoff
-        providerName,
-        symbol
-      );
-    }
   }
 
   // Get current price for a symbol
@@ -67,217 +27,92 @@ class MarketDataService {
         this.lastUpdated[symbol] && 
         now - this.lastUpdated[symbol] < this.updateInterval
       ) {
-        return this.getPriceWithChanges(symbol, this.prices[symbol]);
+        return this.prices[symbol];
       }
 
       if (this.mockData) {
         const mockPrice = this.getMockPrice(symbol);
-        if (this.prices[symbol]) {
-          this.previousPrices[symbol] = this.prices[symbol];
-        }
         this.prices[symbol] = mockPrice;
         this.lastUpdated[symbol] = now;
-        return this.getPriceWithChanges(symbol, mockPrice);
+        return mockPrice;
       }
 
-      // Try to get price from different sources with fallback mechanism
+      // Try to get price from different sources
       let price = null;
       
-      // Determine which provider list to use based on asset type
-      const providerList = this.isCryptoSymbol(symbol) 
-        ? this.providers.crypto 
-        : this.providers.stock;
-      
-      logger.info(`Fetching price for ${symbol} using provider sequence: ${providerList.join(', ')}`);
-      
-      // Try each provider in sequence with retries
-      for (const provider of providerList) {
-        if (price) break;
-        
-        logger.info(`Attempting to fetch price from ${provider} for ${symbol}`);
-        
-        if (provider === 'binance' && this.isCryptoSymbol(symbol) && this.usingExchangeAPI) {
-          // Try Binance with retries
+      // Attempt to get from Binance first for crypto
+      if (this.isCryptoSymbol(symbol) && this.usingExchangeAPI) {
+        try {
+          // Format symbol for Binance if needed (e.g., BTC/USDT -> BTCUSDT)
           const formattedSymbol = this.formatSymbolForExchange(symbol, "binance");
-          
-          price = await this.retryOperation(
-            async () => {
-              const data = await binanceService.getPrice(formattedSymbol);
-              if (!data || !data.price) {
-                throw new Error('Invalid response from Binance');
-              }
-              return parseFloat(data.price);
-            },
-            this.maxRetries,
-            this.retryDelay,
-            'Binance',
-            symbol
-          );
-          
-          if (price) {
-            logger.info(`Successfully fetched price from Binance for ${symbol}: ${price}`);
-            break;
+          const binanceData = await binanceService.getPrice(formattedSymbol);
+          if (binanceData && binanceData.price) {
+            price = parseFloat(binanceData.price);
+            logger.debug(`Binance price for ${symbol}: ${price}`);
           }
+        } catch (error) {
+          logger.warn(`Binance price fetch failed for ${symbol}: ${error.message}`);
         }
-        
-        if (provider === 'cryptoCompare') {
-          // Try CryptoCompare with retries
-          const baseSymbol = symbol.split('/')[0];
+      }
+      
+      // If Binance failed, try CryptoCompare for crypto
+      if (!price && this.isCryptoSymbol(symbol)) {
+        try {
+          const cryptoSymbol = symbol.split('/')[0];
           const quoteSymbol = symbol.split('/')[1] || 'USD';
           
-          price = await this.retryOperation(
-            async () => {
-              const result = await cryptoCompareService.getPrice(baseSymbol, quoteSymbol);
-              if (result === undefined || result === null) {
-                throw new Error('Invalid response from CryptoCompare');
-              }
-              return result;
-            },
-            this.maxRetries,
-            this.retryDelay,
-            'CryptoCompare',
-            symbol
-          );
-          
-          if (price) {
-            logger.info(`Successfully fetched price from CryptoCompare for ${symbol}: ${price}`);
-            break;
-          }
+          // Use the proper getPrice method which should handle errors internally now
+          price = await cryptoCompareService.getPrice(cryptoSymbol, quoteSymbol);
+          logger.debug(`CryptoCompare price for ${symbol}: ${price}`);
+        } catch (error) {
+          logger.warn(`CryptoCompare price fetch failed for ${symbol}: ${error.message}`);
         }
-        
-        if (provider === 'alphaVantage') {
-          // Try AlphaVantage with retries
+      }
+      
+      // For stocks, try Alpha Vantage
+      if (!price && !this.isCryptoSymbol(symbol)) {
+        try {
           const stockSymbol = symbol.split('/')[0];
-          
-          price = await this.retryOperation(
-            async () => {
-              const data = await alphaVantageService.getQuote(stockSymbol);
-              if (!data || !data.price) {
-                throw new Error('Invalid response from Alpha Vantage');
-              }
-              return parseFloat(data.price);
-            },
-            this.maxRetries,
-            this.retryDelay,
-            'Alpha Vantage',
-            symbol
-          );
-          
-          if (price) {
-            logger.info(`Successfully fetched price from Alpha Vantage for ${symbol}: ${price}`);
-            break;
+          const alphaVantageData = await alphaVantageService.getQuote(stockSymbol);
+          if (alphaVantageData && alphaVantageData.price) {
+            price = parseFloat(alphaVantageData.price);
           }
+        } catch (error) {
+          logger.warn(`Alpha Vantage price fetch failed for ${symbol}: ${error.message}`);
         }
       }
 
       // If all API calls fail, fall back to mock data
       if (!price) {
         price = this.getMockPrice(symbol);
-        logger.warn(`All providers failed for ${symbol}, using fallback mock price: ${price}`);
+        logger.info(`Using fallback mock price for ${symbol}: ${price}`);
       }
 
-      // Store the previous price before updating
-      if (this.prices[symbol]) {
-        this.previousPrices[symbol] = this.prices[symbol];
-      }
       this.prices[symbol] = price;
       this.lastUpdated[symbol] = now;
       
-      return this.getPriceWithChanges(symbol, price);
+      return price;
     } catch (error) {
-      logger.error(`Error in getPrice for ${symbol}:`, error);
-      return this.getPriceWithChanges(symbol, this.getMockPrice(symbol));
-    }
-  }
-
-  /**
-   * Calculate price change and percentage and return enhanced price object
-   * @param {string} symbol - The trading symbol
-   * @param {number} currentPrice - The current price value
-   * @returns {Object} - Enhanced price object with change data
-   */
-  getPriceWithChanges(symbol, currentPrice) {
-    const previousPrice = this.previousPrices[symbol] || currentPrice; // Default to current if no previous
-    const change = currentPrice - previousPrice;
-    const changePercent = previousPrice > 0 ? (change / previousPrice) * 100 : 0;
-
-    return {
-      symbol,
-      price: currentPrice,
-      change: parseFloat(change.toFixed(6)),
-      changePercent: parseFloat(changePercent.toFixed(2)),
-      direction: change > 0 ? 'up' : change < 0 ? 'down' : 'stable',
-      lastUpdated: this.lastUpdated[symbol] || Date.now()
-    };
-  }
-  
-  /**
-   * Get prices for multiple symbols with price change data
-   * @param {Array<string>} symbols - Array of symbols to get prices for
-   * @returns {Promise<Array<Object>>} - Array of price objects with change data
-   */
-  async getPrices(symbols = []) {
-    try {
-      const results = [];
-      
-      for (const symbol of symbols) {
-        const priceData = await this.getPrice(symbol);
-        if (priceData) {
-          results.push(priceData);
-        }
-      }
-      
-      return results;
-    } catch (error) {
-      logger.error('Error in getPrices:', error);
-      return [];
+      logger.error(`Error fetching price for ${symbol}:`, error);
+      return this.getMockPrice(symbol);
     }
   }
 
   // Get order book data
   async getOrderbook(symbol, limit = 10) {
     try {
-      // If mock data is enabled, return mock orderbook
+      // If mock data is enabled, or external APIs fail, return mock orderbook
       if (this.mockData) {
         return this.getMockOrderbook(symbol, limit);
       }
       
-      // Determine which provider list to use based on asset type
-      const providerList = this.isCryptoSymbol(symbol) 
-        ? this.providers.crypto 
-        : this.providers.stock;
-      
-      logger.info(`Fetching orderbook for ${symbol} using provider sequence: ${providerList.join(', ')}`);
-      
-      let orderbook = null;
-      
-      // Try each provider in sequence with retries
-      for (const provider of providerList) {
-        if (orderbook) break; // Stop if we have data
-        
-        logger.info(`Attempting to fetch orderbook from ${provider} for ${symbol}`);
-        
-        if (provider === 'binance' && this.isCryptoSymbol(symbol) && this.usingExchangeAPI) {
-          // Try Binance with retries
+      // Try to get real orderbook data from Binance for crypto
+      if (this.isCryptoSymbol(symbol) && this.usingExchangeAPI) {
+        try {
           const formattedSymbol = this.formatSymbolForExchange(symbol, "binance");
+          const binanceOrderbook = await binanceService.getDepth(formattedSymbol, limit);
           
-          const binanceOrderbook = await this.retryOperation(
-            async () => {
-              const data = await binanceService.getDepth(formattedSymbol, limit);
-              if (!data || !data.bids || !data.asks) {
-                throw new Error('Invalid orderbook response from Binance');
-              }
-              return data;
-            },
-            this.maxRetries,
-            this.retryDelay,
-            'Binance',
-            symbol
-          );
-          
-          if (binanceOrderbook) {
-            logger.info(`Successfully fetched orderbook from Binance for ${symbol}`);
-            
+          if (binanceOrderbook && binanceOrderbook.bids && binanceOrderbook.asks) {
             let bidTotal = 0;
             let askTotal = 0;
             
@@ -303,40 +138,22 @@ class MarketDataService {
               };
             });
             
-            orderbook = {
+            return {
               bids,
               asks,
               symbol,
               timestamp: Date.now()
             };
-            
-            break;
           }
+        } catch (error) {
+          logger.warn(`Binance orderbook fetch failed for ${symbol}: ${error.message}`);
         }
-        
-        // CryptoCompare also offers order book data
-        if (provider === 'cryptoCompare' && this.isCryptoSymbol(symbol)) {
-          const baseSymbol = symbol.split('/')[0];
-          const quoteSymbol = symbol.split('/')[1] || 'USD';
-          
-          // CryptoCompare might have an orderbook endpoint we could use
-          // Implementation would go here if available
-          // For now, we'll continue to the next provider
-        }
-        
-        // Note: AlphaVantage doesn't provide orderbook data
-        // We'll skip direct implementation for it
-      }
-
-      // If all API calls fail, fall back to mock data
-      if (!orderbook) {
-        orderbook = this.getMockOrderbook(symbol, limit);
-        logger.warn(`All providers failed for ${symbol} orderbook, using fallback mock data`);
       }
       
-      return orderbook;
+      // Fallback to mock data
+      return this.getMockOrderbook(symbol, limit);
     } catch (error) {
-      logger.error(`Error in getOrderbook for ${symbol}:`, error);
+      logger.error(`Error fetching orderbook for ${symbol}:`, error);
       return this.getMockOrderbook(symbol, limit);
     }
   }
@@ -349,81 +166,14 @@ class MarketDataService {
         return this.getMockCandles(symbol, interval, limit);
       }
       
-      // Determine which provider list to use based on asset type
-      const providerList = this.isCryptoSymbol(symbol) 
-        ? this.providers.crypto 
-        : this.providers.stock;
-      
-      logger.info(`Fetching candles for ${symbol} using provider sequence: ${providerList.join(', ')}`);
-      
-      let candles = null;
-      
-      // Try each provider in sequence with retries
-      for (const provider of providerList) {
-        if (candles) break;
-        
-        logger.info(`Attempting to fetch candles from ${provider} for ${symbol}`);
-
-        if (provider === 'cryptoCompare' && this.isCryptoSymbol(symbol)) {
-          // Try CryptoCompare with retries
-          const baseSymbol = symbol.split('/')[0];
-          const quoteSymbol = symbol.split('/')[1] || 'USD';
-          
-          try {
-            const cryptoCompareCandles = await this.retryOperation(
-              async () => {
-                const data = await cryptoCompareService.getHistoricalData(baseSymbol, quoteSymbol, interval, limit);
-                if (!data || !data.length) {
-                  throw new Error('Invalid candles response from CryptoCompare');
-                }
-                return data;
-              },
-              this.maxRetries,
-              this.retryDelay,
-              'CryptoCompare',
-              symbol
-            );
-            
-            if (cryptoCompareCandles) {
-              logger.info(`Successfully fetched candles from CryptoCompare for ${symbol}`);
-              
-              candles = cryptoCompareCandles.map(candle => ({
-                timestamp: candle.time * 1000,
-                open: parseFloat(candle.open),
-                high: parseFloat(candle.high),
-                low: parseFloat(candle.low),
-                close: parseFloat(candle.close),
-                volume: parseFloat(candle.volumefrom)
-              }));
-              break;
-            }
-          } catch (error) {
-            logger.warn(`CryptoCompare candles fetch failed for ${symbol}: ${error.message}`);
-          }
-        }
-        
-        if (provider === 'binance' && this.isCryptoSymbol(symbol) && this.usingExchangeAPI) {
-          // Try Binance with retries
+      // Try to get real candlestick data from exchanges for crypto
+      if (this.isCryptoSymbol(symbol) && this.usingExchangeAPI) {
+        try {
           const formattedSymbol = this.formatSymbolForExchange(symbol, "binance");
+          const binanceKlines = await binanceService.getKlines(formattedSymbol, interval, limit);
           
-          const binanceKlines = await this.retryOperation(
-            async () => {
-              const data = await binanceService.getKlines(formattedSymbol, interval, limit);
-              if (!data || !data.length) {
-                throw new Error('Invalid klines response from Binance');
-              }
-              return data;
-            },
-            this.maxRetries,
-            this.retryDelay,
-            'Binance',
-            symbol
-          );
-          
-          if (binanceKlines) {
-            logger.info(`Successfully fetched candles from Binance for ${symbol}`);
-            
-            candles = binanceKlines.map(kline => ({
+          if (binanceKlines && binanceKlines.length > 0) {
+            return binanceKlines.map(kline => ({
               timestamp: kline[0],
               open: parseFloat(kline[1]),
               high: parseFloat(kline[2]),
@@ -436,69 +186,16 @@ class MarketDataService {
               buyBaseAssetVolume: parseFloat(kline[9]),
               buyQuoteAssetVolume: parseFloat(kline[10])
             }));
-            
-            break;
           }
-        }
-        
-        if (provider === 'alphaVantage' && !this.isCryptoSymbol(symbol)) {
-          // Try AlphaVantage with retries for stock data
-          const stockSymbol = symbol.split('/')[0];
-          
-          try {
-            const alphaVantageCandles = await this.retryOperation(
-              async () => {
-                // Choose appropriate time series based on interval
-                const timeSeriesFunction = interval.includes('d') 
-                  ? 'getDailyTimeSeries' 
-                  : 'getIntradayTimeSeries';
-                
-                const data = await alphaVantageService[timeSeriesFunction](stockSymbol, interval, limit);
-                if (!data || !data['Time Series']) {
-                  throw new Error('Invalid candles response from Alpha Vantage');
-                }
-                return data;
-              },
-              this.maxRetries,
-              this.retryDelay,
-              'Alpha Vantage',
-              symbol
-            );
-            
-            if (alphaVantageCandles && alphaVantageCandles['Time Series']) {
-              logger.info(`Successfully fetched candles from Alpha Vantage for ${symbol}`);
-              
-              // Transform Alpha Vantage data to our candle format
-              const timeSeries = alphaVantageCandles['Time Series'];
-              candles = Object.keys(timeSeries).map(dateStr => {
-                const data = timeSeries[dateStr];
-                return {
-                  timestamp: new Date(dateStr).getTime(),
-                  open: parseFloat(data['1. open']),
-                  high: parseFloat(data['2. high']),
-                  low: parseFloat(data['3. low']),
-                  close: parseFloat(data['4. close']),
-                  volume: parseFloat(data['5. volume'])
-                };
-              }).slice(0, limit);
-              
-              break;
-            }
-          } catch (error) {
-            logger.warn(`Alpha Vantage candles fetch failed for ${symbol}: ${error.message}`);
-          }
+        } catch (error) {
+          logger.warn(`Binance klines fetch failed for ${symbol}: ${error.message}`);
         }
       }
       
-      // If all API calls fail, fall back to mock data
-      if (!candles) {
-        candles = this.getMockCandles(symbol, interval, limit);
-        logger.warn(`All providers failed for ${symbol} candles, using fallback mock data`);
-      }
-      
-      return candles;
+      // For non-crypto assets or if exchange API fails, use mock data
+      return this.getMockCandles(symbol, interval, limit);
     } catch (error) {
-      logger.error(`Error in getCandles for ${symbol}:`, error);
+      logger.error(`Error fetching candles for ${symbol}:`, error);
       return this.getMockCandles(symbol, interval, limit);
     }
   }
@@ -512,67 +209,46 @@ class MarketDataService {
       
       const pairs = [];
       
-      // Determine providers to use
-      const providerList = this.providers.crypto;
-      
-      logger.info(`Fetching trading pairs using provider sequence: ${providerList.join(', ')}`);
-      
-      // Try each provider in sequence with retries
-      for (const provider of providerList) {
-        logger.info(`Attempting to fetch trading pairs from ${provider}`);
-        
-        if (provider === 'binance' && this.usingExchangeAPI) {
-          // Try Binance with retries
-          const binancePairs = await this.retryOperation(
-            async () => {
-              const data = await binanceService.getExchangeInfo();
-              if (!data || !data.symbols) {
-                throw new Error('Invalid response from Binance for trading pairs');
-              }
-              return data;
-            },
-            this.maxRetries,
-            this.retryDelay,
-            'Binance',
-            'trading pairs'
-          );
-          
+      // Try to get trading pairs from exchanges
+      if (this.usingExchangeAPI) {
+        // Get crypto trading pairs from Binance
+        try {
+          const binancePairs = await binanceService.getExchangeInfo();
           if (binancePairs && binancePairs.symbols) {
-            logger.info(`Successfully fetched trading pairs from Binance`);
-            
             binancePairs.symbols.forEach(symbol => {
               if (symbol.status === 'TRADING') {
                 pairs.push({
                   symbol: `${symbol.baseAsset}/${symbol.quoteAsset}`,
                   baseAsset: symbol.baseAsset,
                   quoteAsset: symbol.quoteAsset,
-                  type: 'crypto',
-                  minQuantity: parseFloat(symbol.filters.find(f => f.filterType === 'LOT_SIZE')?.minQty || 0.001),
-                  maxQuantity: parseFloat(symbol.filters.find(f => f.filterType === 'LOT_SIZE')?.maxQty || 1000)
+                  type: 'crypto'
                 });
               }
             });
           }
+        } catch (error) {
+          logger.warn(`Failed to fetch Binance trading pairs: ${error.message}`);
         }
-        
-        // Could add implementation for other providers that offer trading pairs info
-        // For example, CryptoCompare might have endpoints for available pairs
       }
       
       // If we couldn't get pairs from exchanges or we want to add more asset types
-      if (pairs.length === 0) {
-        logger.info('No trading pairs fetched from providers, using mock data');
-        return this.getMockTradingPairs();
+      if (pairs.length === 0 || !this.usingExchangeAPI) {
+        const mockPairs = this.getMockTradingPairs();
+        
+        // Combine real and mock pairs or just use mock if no real pairs
+        const combinedPairs = [...pairs];
+        
+        // Add mock pairs that don't already exist
+        mockPairs.forEach(mockPair => {
+          if (!combinedPairs.some(p => p.symbol === mockPair.symbol)) {
+            combinedPairs.push(mockPair);
+          }
+        });
+        
+        return combinedPairs;
       }
       
-      // Add stock/ETF pairs from mock data since they usually don't come from crypto APIs
-      const mockPairs = this.getMockTradingPairs();
-      const nonCryptoMockPairs = mockPairs.filter(pair => pair.type !== 'crypto');
-      
-      // Combine real crypto pairs with mock stock/ETF pairs
-      const combinedPairs = [...pairs, ...nonCryptoMockPairs];
-      
-      return combinedPairs;
+      return pairs;
     } catch (error) {
       logger.error('Error fetching trading pairs:', error);
       return this.getMockTradingPairs();
@@ -611,7 +287,7 @@ class MarketDataService {
     const baseAsset = symbol.split('/')[0];
     
     const basePrices = {
-      'BTC': 98000,
+      'BTC': 48000,
       'ETH': 3200,
       'BNB': 410,
       'SOL': 100,

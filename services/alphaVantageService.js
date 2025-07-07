@@ -84,39 +84,6 @@ const alphaVantageService = {
       symbol,
     });
   },
-  
-  /**
-   * Get quote data in a standardized format for marketDataService
-   * @param {string} symbol - Stock symbol (e.g., AAPL)
-   * @returns {Promise<Object>} Standardized quote data with price
-   */
-  getQuote: async (symbol) => {
-    try {
-      const quoteData = await alphaVantageService.getStockQuote(symbol);
-      
-      // Check if we got a valid response with "Global Quote"
-      if (quoteData && quoteData["Global Quote"]) {
-        const globalQuote = quoteData["Global Quote"];
-        return {
-          symbol: symbol,
-          price: parseFloat(globalQuote["05. price"]),
-          open: parseFloat(globalQuote["02. open"]),
-          high: parseFloat(globalQuote["03. high"]),
-          low: parseFloat(globalQuote["04. low"]),
-          volume: parseFloat(globalQuote["06. volume"]),
-          latestTradingDay: globalQuote["07. latest trading day"],
-          previousClose: parseFloat(globalQuote["08. previous close"]),
-          change: parseFloat(globalQuote["09. change"]),
-          changePercent: globalQuote["10. change percent"]
-        };
-      }
-      
-      throw new Error(`Invalid response format for symbol ${symbol}`);
-    } catch (error) {
-      logger.error(`Error getting quote for ${symbol}:`, error.message);
-      throw error;
-    }
-  },
 
   /**
    * Get daily time series data for a symbol

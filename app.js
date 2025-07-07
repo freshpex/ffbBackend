@@ -8,6 +8,7 @@ import path from "path";
 import { dirname } from "path";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { setupPerformanceMonitoring } from "./middleware/performance.js";
+import logger from "./middleware/logger.js";
 
 // Import routes
 import authRouter from "./routes/auth.js";
@@ -27,6 +28,7 @@ import priceAlertsRouter from "./routes/priceAlerts.js";
 import marketNewsRouter from "./routes/marketNews.js";
 import adminAnalyticsRouter from "./routes/adminAnalytics.js";
 import tradingRouter from "./routes/trading.js";
+import visitorRouter from "./routes/visitors.js";
 
 // Initialize Express app
 const app = express();
@@ -34,12 +36,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Setup middleware
-app.use(cors({
-  origin: ['https://ffbf.vercel.app', 'https://ffbroker.vercel.app', 'http://localhost:5173'],
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH', 'UPDATE'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
-}));
+app.use(cors());
 app.use(helmet());
 app.use(compression());
 app.use(express.json());
@@ -77,6 +74,7 @@ app.use("/api/price-alerts", priceAlertsRouter);
 app.use("/api/market-news", marketNewsRouter);
 app.use("/api/admin/analytics", adminAnalyticsRouter);
 app.use("/api/trading", tradingRouter);
+app.use("/api/tracking", visitorRouter);
 
 // Error handling middleware
 app.use(errorHandler);

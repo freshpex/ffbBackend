@@ -8,7 +8,7 @@ export const getNotifications = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    const notifications = await Notification.find({ recipient: userId })
+    const notifications = await Notification.find({ user: userId })
       .sort({ createdAt: -1 })
       .limit(50);
 
@@ -41,7 +41,7 @@ export const markAsRead = async (req, res) => {
 
     const notification = await Notification.findOne({
       _id: notificationId,
-      recipient: userId,
+      user: userId,
     });
 
     if (!notification) {
@@ -75,7 +75,7 @@ export const markAllAsRead = async (req, res) => {
     const userId = req.user.id;
 
     await Notification.updateMany(
-      { recipient: userId, read: false },
+      { user: userId, read: false },
       { read: true },
     );
 
@@ -108,7 +108,7 @@ export const deleteNotification = async (req, res) => {
 
     const notification = await Notification.findOneAndDelete({
       _id: notificationId,
-      recipient: userId,
+      user: userId,
     });
 
     if (!notification) {
@@ -145,7 +145,7 @@ export const createNotification = async (req, res) => {
     }
 
     const notification = new Notification({
-      recipient: userId,
+      user: userId,
       title,
       message,
       type: type || "info",
