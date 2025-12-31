@@ -134,7 +134,8 @@ export const approveKycRequest = async (req, res, next) => {
 
     user.kycVerified = true;
     user.kycStatus = "approved";
-    user.kycApprovedAt = new Date();
+    user.kycVerifiedAt = new Date();
+    user.kycVerifiedBy = req.user._id;
 
     await user.save({ session });
     await createKycNotification(kycRequest, user);

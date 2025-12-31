@@ -30,6 +30,7 @@ import adminAnalyticsRouter from "./routes/adminAnalytics.js";
 import tradingRouter from "./routes/trading.js";
 import visitorRouter from "./routes/visitors.js";
 import tasksRouter from "./routes/tasks.js";
+import kycRouter from "./routes/kyc.js";
 
 // Initialize Express app
 const app = express();
@@ -77,6 +78,8 @@ app.use("/api/admin/analytics", adminAnalyticsRouter);
 app.use("/api/trading", tradingRouter);
 app.use("/api/tracking", visitorRouter);
 app.use("/api/tasks", tasksRouter);
+// KYC routes (user-facing)
+app.use("/api/users/kyc", kycRouter);
 
 // Error handling middleware
 app.use(errorHandler);

@@ -56,9 +56,9 @@ export const submitKyc = async (req, res, next) => {
     }
 
     // Validate document uploads
-    if (!req.files || !req.files.idDocument || !req.files.proofOfAddress) {
+    if (!req.files || !req.files.idDocument) {
       throw new ApiError(
-        "ID document and proof of address are required",
+        "ID document is required",
         400,
         "validation_error",
       );
@@ -69,14 +69,19 @@ export const submitKyc = async (req, res, next) => {
       req.files.idDocument[0],
       "kyc-documents",
     );
-    const proofOfAddressUrl = await uploadToS3(
-      req.files.proofOfAddress[0],
-      "kyc-documents",
-    );
+    
+    // Optional proof of address
+    let proofOfAddressUrl = null;
+    if (req.files.proofOfAddress && req.files.proofOfAddress[0]) {
+      proofOfAddressUrl = await uploadToS3(
+        req.files.proofOfAddress[0],
+        "kyc-documents",
+      );
+    }
 
     // Optional selfie
     let selfieUrl = null;
-    if (req.files.selfie) {
+    if (req.files.selfie && req.files.selfie[0]) {
       selfieUrl = await uploadToS3(req.files.selfie[0], "kyc-documents");
     }
 

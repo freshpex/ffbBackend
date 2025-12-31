@@ -517,6 +517,11 @@ export const getUserPositions = async (req, res, next) => {
     const positionsArray = await Promise.all(Object.values(positions)
       .filter(position => position.quantity > 0)
       .map(async (position) => {
+        if (!position.totalInvested || !position.quantity) {
+          logger.error(`Invalid position data for ${position.symbol}: totalInvested=${position.totalInvested}, quantity=${position.quantity}`);
+          throw new Error(`Position data inconsistency for ${position.symbol}`);
+        }
+        
         position.averagePrice = position.totalInvested / position.quantity;
         
         // Get current price from market data service
@@ -531,6 +536,22 @@ export const getUserPositions = async (req, res, next) => {
           position.value = position.quantity * position.averagePrice;
           position.profitLoss = 0;
           position.profitLossPercentage = 0;
+        }
+        
+        // Ensure all values are defined before formatting
+        if (typeof position.averagePrice !== 'number' || 
+            typeof position.currentPrice !== 'number' || 
+            typeof position.value !== 'number' || 
+            typeof position.profitLoss !== 'number' || 
+            typeof position.profitLossPercentage !== 'number') {
+          logger.error(`Non-numeric values detected for ${position.symbol}:`, {
+            averagePrice: position.averagePrice,
+            currentPrice: position.currentPrice,
+            value: position.value,
+            profitLoss: position.profitLoss,
+            profitLossPercentage: position.profitLossPercentage
+          });
+          throw new Error(`Invalid numeric values for position ${position.symbol}`);
         }
         
         return {

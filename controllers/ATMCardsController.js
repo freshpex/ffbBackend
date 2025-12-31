@@ -3,8 +3,7 @@ import Transaction from "../models/Transaction.js";
 import User from "../models/User.js";
 import logger from "../middleware/logger.js";
 import { ApiError } from "../middleware/errorHandler.js";
-import pkg from "uuid";
-const { v4: uuidv4 } = pkg;
+import { v4 as uuidv4 } from "uuid";
 
 // Helper functions for card generation
 function generateCardNumber() {

@@ -8,6 +8,30 @@ import { ApiError } from "../middleware/errorHandler.js";
 // Investment plans
 const INVESTMENT_PLANS = [
   {
+    id: "mini-200",
+    name: "Mini Saver - $200",
+    minAmount: 200,
+    maxAmount: 499,
+    returnRate: 0.06,
+    duration: 30,
+    features: ["Low entry barrier", "Daily payouts", "Easy start"],
+    description:
+      "Perfect for beginners! Start your investment journey with just $200. Low risk with daily interest payouts.",
+    roi: 6,
+  },
+  {
+    id: "mini-500",
+    name: "Mini Boost - $500",
+    minAmount: 500,
+    maxAmount: 999,
+    returnRate: 0.07,
+    duration: 45,
+    features: ["Better returns", "Daily payouts", "Low risk"],
+    description:
+      "Boost your savings with our $500 mini plan. Better interest rates with the same low-risk approach.",
+    roi: 7,
+  },
+  {
     id: "basic",
     name: "Basic Plan",
     minAmount: 1000,

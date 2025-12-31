@@ -1,6 +1,7 @@
 import logger from "../middleware/logger.js";
 import User from "../models/User.js";
 import LoginActivity from "../models/LoginActivity.js";
+import Referral from "../models/Referral.js";
 import jwt from "jsonwebtoken";
 import config from "../config/config.js";
 
@@ -119,16 +120,32 @@ export const register = async (req, res, next) => {
             `Processing referral for user ${email} with referrer ${referrer.email}`,
           );
 
+          // Set referredBy on the new user
+          user.referredBy = referrer._id;
+          await user.save();
+
           // Create referral record
           const referral = new Referral({
             referrer: referrer._id,
             referee: user._id,
-            status: "active",
-            commission: 0,
-            createdAt: new Date(),
+            code: referralCode,
+            status: "pending",
+            rewards: {
+              referrerBonus: 0,
+              refereeBonus: 0,
+              currency: "USD",
+            },
           });
 
           await referral.save();
+
+          // Update referrer stats
+          referrer.referralStats.totalReferrals = (referrer.referralStats.totalReferrals || 0) + 1;
+          await referrer.save();
+
+          logger.info(`Referral record created for referee ${user.email}`);
+        } else {
+          logger.warn(`Invalid referral code provided: ${referralCode}`);
         }
       }
     }

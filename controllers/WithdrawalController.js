@@ -143,6 +143,15 @@ export const createWithdrawal = async (req, res, next) => {
       throw new ApiError("User not found", 404, "not_found");
     }
 
+    // Verify KYC status - only verified users can withdraw
+    if (!user.kycVerified) {
+      throw new ApiError(
+        "KYC verification required to withdraw funds. Please complete KYC verification in Settings.",
+        403,
+        "kyc_required"
+      );
+    }
+
     // Calculate fee (e.g., 1% of withdrawal amount)
     const feePercentage = 0.01;
     const fee = parseFloat((amount * feePercentage).toFixed(2));

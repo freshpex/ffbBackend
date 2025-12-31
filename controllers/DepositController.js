@@ -1,5 +1,6 @@
 import Transaction from "../models/Transaction.js";
 import User from "../models/User.js";
+import Referral from "../models/Referral.js";
 import mongoose from "mongoose";
 import logger from "../middleware/logger.js";
 import { ApiError } from "../middleware/errorHandler.js";
@@ -418,6 +419,79 @@ export const adminApproveDeposit = async (req, res, next) => {
     const user = await User.findById(deposit.user).session(session);
     user.balance += deposit.amount;
     await user.save({ session });
+
+    // Check and auto-complete pending referrals if conditions are met
+    // Conditions: User must be KYC verified and deposit amount >= $100
+    if (user.kycVerified && deposit.amount >= 100) {
+      const pendingReferral = await Referral.findOne({
+        referee: user._id,
+        status: "pending",
+      }).session(session);
+
+      if (pendingReferral) {
+        // Complete the referral
+        pendingReferral.status = "completed";
+        pendingReferral.completedAt = new Date();
+        await pendingReferral.save({ session });
+
+        // Credit referrer with the bonus
+        const referrer = await User.findById(pendingReferral.referrer).session(session);
+        if (referrer) {
+          const referrerBonus = pendingReferral.rewards?.referrerBonus || 50;
+          referrer.balance += referrerBonus;
+          
+          // Update referrer stats
+          if (!referrer.referralStats) {
+            referrer.referralStats = {
+              totalEarnings: referrerBonus,
+              totalReferrals: 1,
+              activeReferrals: 1,
+              pendingCommissions: 0,
+            };
+          } else {
+            referrer.referralStats.totalEarnings = (referrer.referralStats.totalEarnings || 0) + referrerBonus;
+            referrer.referralStats.activeReferrals = (referrer.referralStats.activeReferrals || 0) + 1;
+          }
+          
+          await referrer.save({ session });
+
+          // Create transaction for referrer bonus
+          const referrerTransaction = new Transaction({
+            user: referrer._id,
+            type: "bonus",
+            amount: referrerBonus,
+            currency: "USD",
+            status: "completed",
+            method: "referral",
+            description: `Referral bonus for referring ${user.email}`,
+            reference: pendingReferral._id.toString(),
+            processedAt: new Date(),
+          });
+          await referrerTransaction.save({ session });
+        }
+
+        // Credit referee with the bonus
+        const refereeBonus = pendingReferral.rewards?.refereeBonus || 25;
+        user.balance += refereeBonus;
+        await user.save({ session });
+
+        // Create transaction for referee bonus
+        const refereeTransaction = new Transaction({
+          user: user._id,
+          type: "bonus",
+          amount: refereeBonus,
+          currency: "USD",
+          status: "completed",
+          method: "referral",
+          description: "Welcome bonus from referral",
+          reference: pendingReferral._id.toString(),
+          processedAt: new Date(),
+        });
+        await refereeTransaction.save({ session });
+
+        logger.info(`Auto-completed referral ${pendingReferral._id} for user ${user.email}`);
+      }
+    }
 
     // Commit transaction
     await session.commitTransaction();
