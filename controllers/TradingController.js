@@ -6,6 +6,7 @@ import { ApiError } from "../middleware/errorHandler.js";
 import marketDataService from "../services/marketDataService.js";
 import Transaction from "../models/Transaction.js";
 import { processTaskEvent } from "./TaskController.js"; // Import the task event processor
+import { calculatePositionsFromFilledOrders, toFiniteNumber } from "../utils/portfolioCalculator.js";
 
 // Trading fee percentage (default 0.1%)
 const TRADING_FEE_PERCENTAGE = parseFloat(process.env.TRADING_FEE_PERCENTAGE || 0.1);
@@ -468,104 +469,87 @@ export const getUserPositions = async (req, res, next) => {
     }
     
     // Ensure balance is a valid number
-    const userBalance = typeof user.balance === 'number' ? user.balance : 0;
+    const userBalance = typeof user.balance === 'number' && Number.isFinite(user.balance)
+      ? user.balance
+      : 0;
 
-    const buyOrders = await Order.find({
+    if (!Number.isFinite(userBalance)) {
+      logger.warn(`User ${userId} has non-numeric balance value; treating as 0`);
+    }
+
+    const filledOrders = await Order.find({
       user: userId,
-      side: "buy",
-      status: "filled"
-    });
+      status: "filled",
+    }).select(
+      "symbol side status quantity price executedQuantity executionPrice fee total processedAt createdAt updatedAt"
+    );
 
-    const sellOrders = await Order.find({
-      user: userId,
-      side: "sell",
-      status: "filled"
-    });
+    const { positions: rawPositions, warnings, patches } =
+      calculatePositionsFromFilledOrders(filledOrders);
 
-    const positions = {};
-    
-    buyOrders.forEach(order => {
-      if (!positions[order.symbol]) {
-        positions[order.symbol] = {
-          symbol: order.symbol,
-          quantity: 0,
-          averagePrice: 0,
-          totalInvested: 0,
-          currentPrice: null,
-          value: 0,
-          profitLoss: 0,
-          profitLossPercentage: 0
+    // Self-heal: if we derived missing executedQuantity/executionPrice, persist them.
+    if (patches.length > 0) {
+      try {
+        await Order.bulkWrite(patches, { ordered: false });
+      } catch (patchError) {
+        // Don't fail the request if repair fails; it's best-effort.
+        logger.warn(`Failed to patch some filled orders for user ${userId}: ${patchError.message}`);
+      }
+    }
+
+    const positionsArray = await Promise.all(
+      rawPositions.map(async (position) => {
+        const quantity = toFiniteNumber(position.quantity);
+        const totalInvested = toFiniteNumber(position.totalInvested);
+        if (!quantity || quantity <= 0 || !totalInvested || totalInvested <= 0) {
+          // This should be rare after normalization, but never crash the entire portfolio.
+          logger.error(
+            `Invalid position data for ${position.symbol}: totalInvested=${position.totalInvested}, quantity=${position.quantity}`
+          );
+          return null;
+        }
+
+        const averagePrice = totalInvested / quantity;
+
+        // Get current price from market data service (guaranteed to be numeric fallback)
+        const currentPrice = await marketDataService.getPrice(position.symbol);
+        const value = quantity * currentPrice;
+        const profitLoss = value - totalInvested;
+        const profitLossPercentage = (profitLoss / totalInvested) * 100;
+
+        // Validate numerics before formatting
+        const numericFields = {
+          averagePrice,
+          currentPrice,
+          value,
+          profitLoss,
+          profitLossPercentage,
         };
-      }
-      
-      const position = positions[order.symbol];
-      position.quantity += order.executedQuantity;
-      position.totalInvested += (order.executedQuantity * order.executionPrice);
-      position.lastTradeTimestamp = order.processedAt;
-    });
-    
-    sellOrders.forEach(order => {
-      if (positions[order.symbol]) {
-        positions[order.symbol].quantity -= order.executedQuantity;
-        
-        if (positions[order.symbol].lastTradeTimestamp < order.processedAt) {
-          positions[order.symbol].lastTradeTimestamp = order.processedAt;
+        for (const [key, val] of Object.entries(numericFields)) {
+          if (typeof val !== 'number' || !Number.isFinite(val)) {
+            logger.error(`Non-numeric ${key} for ${position.symbol}: ${val}`);
+            return null;
+          }
         }
-      }
-    });
-    
-    const positionsArray = await Promise.all(Object.values(positions)
-      .filter(position => position.quantity > 0)
-      .map(async (position) => {
-        if (!position.totalInvested || !position.quantity) {
-          logger.error(`Invalid position data for ${position.symbol}: totalInvested=${position.totalInvested}, quantity=${position.quantity}`);
-          throw new Error(`Position data inconsistency for ${position.symbol}`);
-        }
-        
-        position.averagePrice = position.totalInvested / position.quantity;
-        
-        // Get current price from market data service
-        try {
-          position.currentPrice = await marketDataService.getPrice(position.symbol);
-          position.value = position.quantity * position.currentPrice;
-          position.profitLoss = position.value - position.totalInvested;
-          position.profitLossPercentage = (position.profitLoss / position.totalInvested) * 100;
-        } catch (error) {
-          logger.warn(`Could not fetch price for ${position.symbol}: ${error.message}`);
-          position.currentPrice = position.averagePrice; // Fallback to average price
-          position.value = position.quantity * position.averagePrice;
-          position.profitLoss = 0;
-          position.profitLossPercentage = 0;
-        }
-        
-        // Ensure all values are defined before formatting
-        if (typeof position.averagePrice !== 'number' || 
-            typeof position.currentPrice !== 'number' || 
-            typeof position.value !== 'number' || 
-            typeof position.profitLoss !== 'number' || 
-            typeof position.profitLossPercentage !== 'number') {
-          logger.error(`Non-numeric values detected for ${position.symbol}:`, {
-            averagePrice: position.averagePrice,
-            currentPrice: position.currentPrice,
-            value: position.value,
-            profitLoss: position.profitLoss,
-            profitLossPercentage: position.profitLossPercentage
-          });
-          throw new Error(`Invalid numeric values for position ${position.symbol}`);
-        }
-        
+
         return {
-          ...position,
-          averagePrice: parseFloat(position.averagePrice.toFixed(8)),
-          currentPrice: parseFloat(position.currentPrice.toFixed(8)),
-          value: parseFloat(position.value.toFixed(2)),
-          profitLoss: parseFloat(position.profitLoss.toFixed(2)),
-          profitLossPercentage: parseFloat(position.profitLossPercentage.toFixed(2)),
+          symbol: position.symbol,
+          quantity: parseFloat(quantity.toFixed(8)),
+          averagePrice: parseFloat(averagePrice.toFixed(8)),
+          totalInvested: parseFloat(totalInvested.toFixed(2)),
+          currentPrice: parseFloat(currentPrice.toFixed(8)),
+          value: parseFloat(value.toFixed(2)),
+          profitLoss: parseFloat(profitLoss.toFixed(2)),
+          profitLossPercentage: parseFloat(profitLossPercentage.toFixed(2)),
+          lastTradeTimestamp: position.lastTradeTimestamp,
         };
-      }));
+      })
+    );
+
+    const cleanPositions = positionsArray.filter(Boolean);
 
     // Calculate the total value of all positions
-    const portfolioValue = positionsArray.reduce((sum, position) => sum + position.value, 0);
+    const portfolioValue = cleanPositions.reduce((sum, position) => sum + position.value, 0);
     
     // Format all balances consistently
     const formattedBalance = parseFloat(userBalance.toFixed(2));
@@ -574,12 +558,13 @@ export const getUserPositions = async (req, res, next) => {
     res.status(200).json({
       success: true,
       data: {
-        positions: positionsArray,
+        positions: cleanPositions,
         balances: {
           USD: formattedBalance,
           USDT: formattedBalance // Include USDT balance that mirrors USD for trading pairs that use USDT
         },
-        totalValue: totalValue
+        totalValue: totalValue,
+        warnings
       }
     });
   } catch (error) {

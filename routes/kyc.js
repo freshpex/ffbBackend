@@ -13,9 +13,10 @@ router.use(verifyToken);
 router.post(
   "/",
   upload.fields([
-    { name: "idDocument", maxCount: 1 },
-    { name: "proofOfAddress", maxCount: 1 },
-    { name: "selfie", maxCount: 1 },
+    { name: "frontImage", maxCount: 1 },
+    { name: "backImage", maxCount: 1 },
+    { name: "proofOfAddressImage", maxCount: 1 },
+    { name: "selfieImage", maxCount: 1 },
   ]),
   asyncHandler(UserKycController.submitKyc),
 );

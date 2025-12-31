@@ -43,8 +43,12 @@ const kycDocumentSchema = new mongoose.Schema({
   url: {
     type: String,
     required: function () {
-      // Only require if parent object is present and verified is true
-      return this.parent().verified === true;
+      try {
+        const parent = typeof this.parent === "function" ? this.parent() : null;
+        return parent?.verified === true;
+      } catch (e) {
+        return false;
+      }
     },
     default: "pending",
   },
@@ -274,6 +278,15 @@ userSchema.pre("save", function (next) {
 
 // Compare password method
 userSchema.methods.comparePassword = async function (candidatePassword) {
+  if (typeof candidatePassword !== "string" || candidatePassword.length === 0) {
+    return false;
+  }
+
+  // Some legacy/Firebase-created accounts may not have a local password hash.
+  if (typeof this.password !== "string" || this.password.length === 0) {
+    return false;
+  }
+
   return bcrypt.compare(candidatePassword, this.password);
 };
 

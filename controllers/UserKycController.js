@@ -9,19 +9,20 @@ import { createKycNotification } from "../services/notificationService.js";
 // Submit KYC verification request
 export const submitKyc = async (req, res, next) => {
   const session = await mongoose.startSession();
-  session.startTransaction();
 
   try {
     const userId = req.user._id;
     const {
-      firstName,
-      lastName,
+      documentType,
+      documentNumber,
+      proofOfAddressType,
+      countryOfIssue,
       dateOfBirth,
-      address,
+      street,
       city,
+      state,
       postalCode,
       country,
-      documentType,
     } = req.body;
 
     // Check if user already has a pending KYC request
@@ -31,22 +32,38 @@ export const submitKyc = async (req, res, next) => {
     });
 
     if (existingRequest) {
+      try {
+        await User.updateOne(
+          { _id: userId },
+          { $set: { kycStatus: "pending", kycVerified: false } },
+          { timestamps: false },
+        );
+      } catch (e) {
+        // best-effort only
+      }
+
       throw new ApiError(
-        "You already have a pending KYC verification request",
+        "KYC already submitted and is pending review",
         400,
         "duplicate_request",
       );
     }
 
-    // Validate required fields
+    // Start a transaction only once we know we intend to write.
+    session.startTransaction();
+
+    // Validate required fields (match KycRequest schema)
     if (
-      !firstName ||
-      !lastName ||
+      !documentType ||
+      !documentNumber ||
+      !proofOfAddressType ||
+      !countryOfIssue ||
       !dateOfBirth ||
-      !address ||
+      !street ||
       !city ||
-      !country ||
-      !documentType
+      !state ||
+      !postalCode ||
+      !country
     ) {
       throw new ApiError(
         "All required fields must be provided",
@@ -55,82 +72,106 @@ export const submitKyc = async (req, res, next) => {
       );
     }
 
-    // Validate document uploads
-    if (!req.files || !req.files.idDocument) {
+    // Validate document uploads (match KycRequest schema)
+    if (!req.files?.frontImage?.[0]) {
+      throw new ApiError("Front ID image is required", 400, "validation_error");
+    }
+    if (!req.files?.selfieImage?.[0]) {
+      throw new ApiError("Selfie image is required", 400, "validation_error");
+    }
+    if (!req.files?.proofOfAddressImage?.[0]) {
       throw new ApiError(
-        "ID document is required",
+        "Proof of address image is required",
         400,
         "validation_error",
       );
     }
 
-    // Upload documents to S3
-    const idDocumentUrl = await uploadToS3(
-      req.files.idDocument[0],
+    // Upload documents to storage
+    const frontImageUrl = await uploadToS3(
+      req.files.frontImage[0],
       "kyc-documents",
     );
-    
-    // Optional proof of address
-    let proofOfAddressUrl = null;
-    if (req.files.proofOfAddress && req.files.proofOfAddress[0]) {
-      proofOfAddressUrl = await uploadToS3(
-        req.files.proofOfAddress[0],
+
+    const selfieImageUrl = await uploadToS3(
+      req.files.selfieImage[0],
+      "kyc-documents",
+    );
+
+    const proofOfAddressImageUrl = await uploadToS3(
+      req.files.proofOfAddressImage[0],
+      "kyc-documents",
+    );
+
+    let backImageUrl = null;
+    if (req.files?.backImage?.[0]) {
+      backImageUrl = await uploadToS3(
+        req.files.backImage[0],
         "kyc-documents",
       );
     }
 
-    // Optional selfie
-    let selfieUrl = null;
-    if (req.files.selfie && req.files.selfie[0]) {
-      selfieUrl = await uploadToS3(req.files.selfie[0], "kyc-documents");
-    }
-
-    // Create KYC request
+    // Create KYC request (schema-aligned)
     const kycRequest = new KycRequest({
       user: userId,
-      information: {
-        firstName,
-        lastName,
-        dateOfBirth,
-        address,
+      status: "pending",
+      documentType,
+      documentNumber,
+      frontImage: frontImageUrl,
+      backImage: backImageUrl,
+      selfieImage: selfieImageUrl,
+      proofOfAddressImage: proofOfAddressImageUrl,
+      proofOfAddressType,
+      countryOfIssue,
+      dateOfBirth: new Date(dateOfBirth),
+      address: {
+        street,
         city,
+        state,
         postalCode,
         country,
       },
-      documents: [
-        {
-          type: documentType,
-          url: idDocumentUrl,
-          status: "pending",
-        },
-        {
-          type: "proof_of_address",
-          url: proofOfAddressUrl,
-          status: "pending",
-        },
-      ],
-      status: "pending",
-      submittedAt: new Date(),
     });
-
-    // Add selfie if provided
-    if (selfieUrl) {
-      kycRequest.documents.push({
-        type: "selfie",
-        url: selfieUrl,
-        status: "pending",
-      });
-    }
 
     await kycRequest.save({ session });
 
-    // Update user's KYC status
-    const user = await User.findById(userId).session(session);
-    user.kycStatus = "pending";
-    await user.save({ session });
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      {
+        $set: {
+          kycStatus: "pending",
+          kycVerified: false,
+          kycDocuments: {
+            idCard: {
+              url: frontImageUrl,
+              verified: false,
+              uploadedAt: new Date(),
+            },
+            proofOfAddress: {
+              url: proofOfAddressImageUrl,
+              verified: false,
+              uploadedAt: new Date(),
+            },
+          },
+        },
+      },
+      { new: true, session, runValidators: true },
+    ).select("firstName lastName email");
 
     // Create notification for admin
-    await createKycNotification(kycRequest, user);
+    const fullName =
+      [updatedUser?.firstName, updatedUser?.lastName]
+        .map((v) => (v || "").trim())
+        .filter(Boolean)
+        .join(" ") ||
+      updatedUser?.email ||
+      req.user?.email ||
+      "User";
+
+    await createKycNotification(kycRequest, {
+      ...updatedUser?.toObject?.(),
+      fullName,
+    });
 
     await session.commitTransaction();
 
@@ -142,7 +183,9 @@ export const submitKyc = async (req, res, next) => {
       data: kycRequest,
     });
   } catch (error) {
-    await session.abortTransaction();
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
     logger.error("Error submitting KYC verification:", error);
     next(error);
   } finally {
@@ -157,20 +200,21 @@ export const getKycStatus = async (req, res, next) => {
 
     // Get the user's KYC status
     const user = await User.findById(userId).select(
-      "kycStatus kycVerified kycApprovedAt",
+      "kycStatus kycVerified kycVerifiedAt kycNotes",
     );
 
     // Get the latest KYC request
     const latestRequest = await KycRequest.findOne({ user: userId })
-      .sort({ submittedAt: -1 })
-      .select("status submittedAt notes");
+      .sort({ createdAt: -1 })
+      .select("status createdAt processedAt rejectionReason adminNotes");
 
     res.status(200).json({
       success: true,
       data: {
         kycStatus: user.kycStatus,
         kycVerified: user.kycVerified,
-        kycApprovedAt: user.kycApprovedAt,
+        kycVerifiedAt: user.kycVerifiedAt,
+        kycNotes: user.kycNotes,
         latestRequest: latestRequest || null,
       },
     });

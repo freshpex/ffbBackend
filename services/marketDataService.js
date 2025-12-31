@@ -21,6 +21,14 @@ class MarketDataService {
         return null;
       }
 
+      // If mock data is explicitly enabled, always use a mock price.
+      if (this.mockData) {
+        const mock = this.getMockPrice(symbol);
+        this.prices[symbol] = mock;
+        this.lastUpdated[symbol] = Date.now();
+        return mock;
+      }
+
       const now = Date.now();
       if (
         this.prices[symbol] && 
@@ -75,9 +83,16 @@ class MarketDataService {
         }
       }
 
+      // Normalize: only accept finite numeric prices. Anything else becomes a mock fallback.
+      if (typeof price !== 'number' || !Number.isFinite(price) || price <= 0) {
+        const mock = this.getMockPrice(symbol);
+        logger.warn(`Price unavailable/non-numeric for ${symbol}; using mock price ${mock}`);
+        price = mock;
+      }
+
       this.prices[symbol] = price;
       this.lastUpdated[symbol] = now;
-      
+
       return price;
     } catch (error) {
       logger.error(`Error fetching price for ${symbol}:`, error);

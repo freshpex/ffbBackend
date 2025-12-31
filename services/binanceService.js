@@ -3,6 +3,29 @@ import crypto from "crypto";
 import logger from "../middleware/logger.js";
 import config from "../config/config.js";
 
+const getMockPriceForSymbol = (symbol) => {
+  const normalized = (symbol || '').replace('/', '').toUpperCase();
+  const baseAsset = normalized.replace('USDT', '').replace('USD', '');
+
+  const basePrices = {
+    BTC: 48000,
+    ETH: 3200,
+    BNB: 410,
+    SOL: 100,
+    XRP: 0.5,
+    ADA: 0.45,
+    DOT: 6.8,
+    DOGE: 0.14,
+    AVAX: 28,
+    MATIC: 0.8,
+  };
+
+  const base = basePrices[baseAsset] ?? 100;
+  const variance = base * 0.01; // ±1%
+  const randomFactor = (Math.random() * 2 - 1) * variance;
+  return base + randomFactor;
+};
+
 /**
  * Binance service for market data and trading
  */
@@ -142,7 +165,7 @@ const binanceService = {
       return await binanceService.makePublicRequest("/api/v3/ticker/price", { symbol: formattedSymbol });
     } catch (error) {
       logger.warn(`Using fallback mock price for ${symbol}: ${error.message}`);
-      
+      const mockPrice = getMockPriceForSymbol(symbol);
       return {
         symbol: symbol.replace('/', ''),
         price: mockPrice.toFixed(2)

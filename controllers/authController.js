@@ -46,6 +46,9 @@ export const register = async (req, res, next) => {
 
       // Update existing user with any new information
       user.uid = uid; // Ensure UID is set
+      if (!user.authMethod) {
+        user.authMethod = "google";
+      }
       user.firstName = firstName || user.firstName;
       user.lastName = lastName || user.lastName;
       user.phoneNumber = phoneNumber || user.phoneNumber;
@@ -87,6 +90,7 @@ export const register = async (req, res, next) => {
         email,
         firstName,
         lastName,
+        authMethod: "google",
         phoneNumber,
         accountType: accountType || "individual",
         country,

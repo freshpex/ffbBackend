@@ -124,20 +124,18 @@ export const approveKycRequest = async (req, res, next) => {
     kycRequest.processedAt = new Date();
 
     await kycRequest.save({ session });
-
-    // Update user's KYC status
-    const user = await User.findById(kycRequest.user).session(session);
-
-    if (!user) {
-      throw new ApiError("User not found", 404, "not_found");
-    }
-
-    user.kycVerified = true;
-    user.kycStatus = "approved";
-    user.kycVerifiedAt = new Date();
-    user.kycVerifiedBy = req.user._id;
-
-    await user.save({ session });
+   const user = await User.findByIdAndUpdate(
+      kycRequest.user,
+      {
+        $set: {
+          kycVerified: true,
+          kycStatus: "approved",
+          kycVerifiedAt: new Date(),
+          kycVerifiedBy: req.user._id,
+        },
+      },
+      { new: true, session, runValidators: true },
+    );
     await createKycNotification(kycRequest, user);
     await session.commitTransaction();
 
