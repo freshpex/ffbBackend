@@ -2,6 +2,7 @@ import logger from '../middleware/logger.js';
 import binanceService from './binanceService.js';
 import cryptoCompareService from './cryptoCompareService.js';
 import alphaVantageService from './alphaVantageService.js';
+import coinMarketCapService from './coinMarketCapService.js';
 import config from '../config/config.js';
 
 class MarketDataService {
@@ -19,14 +20,6 @@ class MarketDataService {
       if (!symbol) {
         logger.error('Symbol is required for getPrice');
         return null;
-      }
-
-      // If mock data is explicitly enabled, always use a mock price.
-      if (this.mockData) {
-        const mock = this.getMockPrice(symbol);
-        this.prices[symbol] = mock;
-        this.lastUpdated[symbol] = Date.now();
-        return mock;
       }
 
       const now = Date.now();
@@ -82,13 +75,19 @@ class MarketDataService {
           logger.warn(`Alpha Vantage price fetch failed for ${symbol}: ${error.message}`);
         }
       }
-
-      // Normalize: only accept finite numeric prices. Anything else becomes a mock fallback.
-      if (typeof price !== 'number' || !Number.isFinite(price) || price <= 0) {
-        const mock = this.getMockPrice(symbol);
-        logger.warn(`Price unavailable/non-numeric for ${symbol}; using mock price ${mock}`);
-        price = mock;
-      }
+      
+      // Try coin market cap
+      if (!price && this.isCryptoSymbol(symbol)) {
+          try {
+            const cmcPrice = await coinMarketCapService.getPrice(symbol);
+            if (typeof cmcPrice === 'number' && Number.isFinite(cmcPrice) && cmcPrice > 0) {
+              price = cmcPrice;
+              logger.debug(`CoinMarketCap price for ${symbol}: ${price}`);
+            }
+          } catch (err) {
+            logger.warn(`CoinMarketCap fallback failed for ${symbol}: ${err.message}`);
+          }
+        }
 
       this.prices[symbol] = price;
       this.lastUpdated[symbol] = now;
@@ -328,7 +327,7 @@ class MarketDataService {
     
     return parseFloat((basePrice + randomFactor).toFixed(2));
   }
-  
+
   // Generate mock orderbook data
   getMockOrderbook(symbol, limit = 10) {
     const basePrice = this.getBasePrice(symbol);

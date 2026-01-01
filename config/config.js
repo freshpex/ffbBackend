@@ -46,6 +46,10 @@ const config = {
       apiKey: process.env.CRYPTOCOMPARE_API_KEY || "",
       baseUrl: "https://min-api.cryptocompare.com/data",
     },
+      coinMarketCap: {
+        apiKey: process.env.COINMARKETCAP_API_KEY,
+        baseUrl: "https://pro-api.coinmarketcap.com",
+      },
     finnhub: {
       apiKey: process.env.FINNHUB_API_KEY || "",
       baseUrl: "https://finnhub.io/api/v1",

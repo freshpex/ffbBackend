@@ -8,7 +8,7 @@ const getMockPriceForSymbol = (symbol) => {
   const baseAsset = normalized.replace('USDT', '').replace('USD', '');
 
   const basePrices = {
-    BTC: 48000,
+    BTC: 108000,
     ETH: 3200,
     BNB: 410,
     SOL: 100,
@@ -61,7 +61,7 @@ const binanceService = {
         headers: {
           "X-MBX-APIKEY": process.env.BINANCE_API_KEY
         },
-        timeout: 5000 // 5 second timeout to fail faster
+        timeout: 500 // 5 second timeout to fail faster
       });
       
       return response.data;
@@ -164,12 +164,8 @@ const binanceService = {
       const formattedSymbol = symbol.replace('/', '');
       return await binanceService.makePublicRequest("/api/v3/ticker/price", { symbol: formattedSymbol });
     } catch (error) {
-      logger.warn(`Using fallback mock price for ${symbol}: ${error.message}`);
-      const mockPrice = getMockPriceForSymbol(symbol);
-      return {
-        symbol: symbol.replace('/', ''),
-        price: mockPrice.toFixed(2)
-      };
+      logger.warn(`Binance failed to provide price for ${symbol}: ${error.message}`);
+      
     }
   },
 

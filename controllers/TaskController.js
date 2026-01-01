@@ -637,19 +637,24 @@ export const claimTaskReward = async (req, res, next) => {
     
     // Calculate reward amount (can be modified based on performance, time, etc.)
     const rewardAmount = userTask.rewardAmount || userTask.task.reward;
-    
-    // Add reward to user balance
-    user.balance += rewardAmount;
-    await user.save({ session });
+    const updatedUser = await User.findByIdAndUpdate(
+      req.user._id,
+      { $inc: { balance: rewardAmount } },
+      { 
+        new: true, 
+        session,
+        runValidators: false
+      }
+    );
     
     // Create transaction record
     const transaction = new Transaction({
-      user: user._id,
+      user: updatedUser._id,
       type: "bonus",
       amount: rewardAmount,
       currency: "USD",
       status: "completed",
-      method: "task",
+      method: "system",
       description: `Reward for completing task: ${userTask.task.title}`,
       reference: userTask._id.toString(),
       processedAt: new Date(),
@@ -672,7 +677,7 @@ export const claimTaskReward = async (req, res, next) => {
     
     // Create notification
     await createNotification(
-      user._id,
+      updatedUser._id,
       "Reward Claimed",
       `You've claimed ${rewardAmount} USD for completing the task: ${userTask.task.title}`,
       "reward_claimed",
