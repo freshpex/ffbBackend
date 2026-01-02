@@ -4,6 +4,7 @@ import app from "./app.js";
 import setupWebsocket from "./services/websocket.js";
 import priceAlertService from "./services/priceAlertService.js";
 import logger from "./middleware/logger.js";
+import { seedEducationFromYoutube } from "./services/educationSeeder.js";
 
 const PORT = process.env.PORT || 5000;
 const ENV = process.env.NODE_ENV || "development";
@@ -60,6 +61,11 @@ const initServer = async () => {
 
     // Connect to database
     await connectDB();
+
+    // Auto-seed Education content (non-blocking)
+    seedEducationFromYoutube().catch((err) => {
+      logger.error("Education auto-seed error:", err);
+    });
 
     // Initialize WebSocket server
     const websocketService = setupWebsocket(server);

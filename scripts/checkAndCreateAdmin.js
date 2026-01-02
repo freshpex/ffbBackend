@@ -187,14 +187,8 @@ const checkAndCreateAdmin = async () => {
       });
 
       await adminUser.save();
-
-      console.log("Admin user created successfully");
-      console.log(`Admin email: ${adminUser.email}`);
-      console.log(`Admin password: ${adminPassword}`);
-      console.log(`Admin UID: ${adminUser.uid}`);
     }
 
-    console.log("Script completed successfully.");
     process.exit(0);
   } catch (error) {
     console.error("Error:", error);

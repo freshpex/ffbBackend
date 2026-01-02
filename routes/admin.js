@@ -45,6 +45,8 @@ import {
 import AdminProfileController from "../controllers/AdminProfileController.js";
 import AdminSettingsController from "../controllers/AdminSettingsController.js";
 import AdminNotificationController from "../controllers/AdminNotificationController.js";
+import { syncYoutubePlaylist } from "../controllers/EducationAdminController.js";
+import { listImportHistory, getImportHistoryById } from "../controllers/ImportHistoryController.js";
 import { check } from "express-validator";
 
 const router = express.Router();
@@ -164,6 +166,17 @@ router.put("/users/:id", requireAdmin, asyncHandler(updateUser));
 
 // Delete user
 router.delete("/users/:id", requireSuperAdmin, asyncHandler(deleteUser));
+
+// Sync YouTube playlist into EducationContent (admin only)
+router.post(
+  "/education/sync-youtube",
+  requireAdmin,
+  asyncHandler(syncYoutubePlaylist),
+);
+
+// Import history
+router.get("/education/imports", requireAdmin, asyncHandler(listImportHistory));
+router.get("/education/imports/:id", requireAdmin, asyncHandler(getImportHistoryById));
 
 // Get all users (admin only)
 router.get(

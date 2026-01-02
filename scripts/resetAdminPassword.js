@@ -19,25 +19,18 @@ const resetAdminPassword = async () => {
   let connection;
 
   try {
-    console.log("Connecting to MongoDB...");
     connection = await mongoose.connect(process.env.MONGODB_URI);
 
     // Get a direct reference to the users collection for more control
     const db = mongoose.connection.db;
     const usersCollection = db.collection("users");
-
-    console.log("Finding admin users...");
     const adminUsers = await usersCollection
       .find({
         role: { $in: ["admin", "superadmin"] },
       })
       .toArray();
 
-    console.log(`Found ${adminUsers.length} admin users`);
-
     if (adminUsers.length === 0) {
-      console.log("No admin users found. Creating a new admin user...");
-
       // Create a new admin user
       const salt = await bcrypt.genSalt(10);
       const hashedPassword = await bcrypt.hash("admin123", salt);
@@ -61,16 +54,9 @@ const resetAdminPassword = async () => {
       };
 
       const result = await usersCollection.insertOne(newAdmin);
-      console.log(
-        `Created new admin user: admin@example.com with ID: ${result.insertedId}`,
-      );
-      console.log(`Admin password is: admin123`);
     } else {
-      console.log("Processing existing admin users:");
 
       for (const admin of adminUsers) {
-        console.log(`\nResetting password for ${admin.email}`);
-
         // Generate new salt and hash password
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash("admin123", salt);
@@ -85,7 +71,6 @@ const resetAdminPassword = async () => {
         if (!admin.uid) {
           const uniqueId = generateUniqueId();
           updates.uid = uniqueId;
-          console.log(`Setting new UID: ${uniqueId} for ${admin.email}`);
         } else {
           console.log(`Keeping existing UID: ${admin.uid} for ${admin.email}`);
         }
@@ -94,10 +79,6 @@ const resetAdminPassword = async () => {
         const updateResult = await usersCollection.updateOne(
           { _id: admin._id },
           { $set: updates },
-        );
-
-        console.log(
-          `Updated ${admin.email}: ${updateResult.modifiedCount} document(s) modified`,
         );
       }
 
@@ -110,19 +91,12 @@ const resetAdminPassword = async () => {
         .toArray();
 
       if (nullUidAdmins.length > 0) {
-        console.log(
-          `\nWARNING: There are still ${nullUidAdmins.length} admin users with null UIDs!`,
-        );
-
         // One more attempt to fix them with a different approach
         for (const admin of nullUidAdmins) {
           const uniqueId = generateUniqueId();
           const updateResult = await usersCollection.updateOne(
             { _id: admin._id },
             { $set: { uid: uniqueId } },
-          );
-          console.log(
-            `Force updated ${admin.email} with UID: ${uniqueId} - Result: ${updateResult.modifiedCount} modified`,
           );
         }
       } else {
@@ -143,7 +117,6 @@ const resetAdminPassword = async () => {
 
 resetAdminPassword()
   .then(() => {
-    console.log("Script completed");
     process.exit(0);
   })
   .catch((error) => {

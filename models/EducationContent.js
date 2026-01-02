@@ -43,6 +43,10 @@ const educationContentSchema = new mongoose.Schema(
       type: Number,
       default: 5,
     },
+    durationSeconds: {
+      type: Number,
+      default: null,
+    },
     author: {
       type: String,
       default: "Fidelity First Bank",

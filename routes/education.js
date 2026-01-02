@@ -9,6 +9,7 @@ import {
   getCategories,
   getResources,
 } from "../controllers/EducationController.js";
+import { markProgress, getUserProgress, getContentProgress } from "../controllers/EducationProgressController.js";
 
 const router = express.Router();
 
@@ -32,5 +33,14 @@ router.get("/:id", asyncHandler(getEducationContentById));
 
 // Like educational content
 router.post("/:id/like", asyncHandler(likeEducationContent));
+
+// Mark progress for the authenticated user
+router.post("/progress", verifyToken, asyncHandler(markProgress));
+
+// Get progress for the authenticated user
+router.get("/progress", verifyToken, asyncHandler(getUserProgress));
+
+// Admin: get progress for a specific content
+router.get("/:contentId/progress", verifyToken, asyncHandler(getContentProgress));
 
 export default router;
