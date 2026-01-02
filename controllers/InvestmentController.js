@@ -12,55 +12,55 @@ const INVESTMENT_PLANS = [
     name: "Mini Saver - $200",
     minAmount: 200,
     maxAmount: 499,
-    returnRate: 0.06,
+    returnRate: 1,
     duration: 30,
     features: ["Low entry barrier", "Daily payouts", "Easy start"],
     description:
       "Perfect for beginners! Start your investment journey with just $200. Low risk with daily interest payouts.",
-    roi: 6,
+    roi: 100,
   },
   {
     id: "mini-500",
     name: "Mini Boost - $500",
     minAmount: 500,
     maxAmount: 999,
-    returnRate: 0.07,
+    returnRate: 2.5,
     duration: 45,
     features: ["Better returns", "Daily payouts", "Low risk"],
     description:
       "Boost your savings with our $500 mini plan. Better interest rates with the same low-risk approach.",
-    roi: 7,
+    roi: 250,
   },
   {
     id: "basic",
     name: "Basic Plan",
     minAmount: 1000,
     maxAmount: 10000,
-    returnRate: 0.05,
+    returnRate: 3.5,
     duration: 30,
     features: ["Lower risk", "Fixed returns", "Monthly payouts"],
     description:
       "Our entry-level investment plan designed for beginners. Start your investment journey with minimal risk and steady returns.",
-    roi: 5,
+    roi: 350,
   },
   {
     id: "standard",
     name: "Standard Plan",
     minAmount: 10000,
     maxAmount: 50000,
-    returnRate: 0.08,
+    returnRate: 4,
     duration: 60,
     features: ["Moderate risk", "Higher returns", "Bi-weekly payouts"],
     description:
       "Balanced investment option for experienced investors looking for better returns with manageable risk levels.",
-    roi: 8,
+    roi: 400,
   },
   {
     id: "premium",
     name: "Premium Plan",
     minAmount: 50000,
     maxAmount: 250000,
-    returnRate: 0.12,
+    returnRate: 6,
     duration: 90,
     features: [
       "Strategic investments",
@@ -70,7 +70,7 @@ const INVESTMENT_PLANS = [
     ],
     description:
       "Our premium offering for serious investors. High returns with expert portfolio management and exclusive benefits.",
-    roi: 12,
+    roi: 600,
   },
 ];
 

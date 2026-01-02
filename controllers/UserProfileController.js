@@ -1,28 +1,12 @@
 import User from "../models/User.js";
+import Investment from "../models/Investment.js";
+import Transaction from "../models/Transaction.js";
 import multer from "multer";
-import path from "path";
-import fs from "fs";
 import { ApiError } from "../middleware/errorHandler.js";
 import logger from "../middleware/logger.js";
+import { uploadToS3 } from "../services/storageService.js";
 
-// Configure multer storage
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    const uploadDir = "uploads/profile-images";
-
-    // Create directory if it doesn't exist
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-
-    cb(null, uploadDir);
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    const ext = path.extname(file.originalname);
-    cb(null, "profile-" + uniqueSuffix + ext);
-  },
-});
+const storage = multer.memoryStorage();
 
 // File filter for image uploads
 const fileFilter = (req, file, cb) => {
@@ -43,6 +27,36 @@ export const upload = multer({
   fileFilter: fileFilter,
 });
 
+const serializeUserProfile = (user) => {
+  if (!user) return null;
+
+  // Support both legacy string address and current object address
+  const addressValue =
+    typeof user.address === "string"
+      ? user.address
+      : user.address?.street || "";
+
+  return {
+    id: user._id?.toString?.() || user.id,
+    email: user.email || "",
+    username: user.username || "",
+    firstName: user.firstName || "",
+    lastName: user.lastName || "",
+    profileImage: user.profileImage || "",
+    phone: user.phone || user.phoneNumber || "",
+    address: addressValue,
+    country: user.country || "",
+    balance: user.balance || 0,
+    accountBalance: user.balance || 0,
+    kycStatus: user.kycStatus,
+    kycVerified: user.kycVerified,
+    kycVerifiedAt: user.kycVerifiedAt,
+    kycNotes: user.kycNotes,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+  };
+};
+
 export const getUserProfile = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -60,24 +74,7 @@ export const getUserProfile = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      data: {
-        id: user._id,
-        email: user.email || "",
-        username: user.username || "",
-        firstName: user.firstName || "",
-        lastName: user.lastName || "",
-        profileImage: user.profileImage || "",
-        phone: user.phone || "",
-        address: user.address || "",
-        balance: user.balance || 0,
-        accountBalance: user.balance || 0,
-        kycStatus: user.kycStatus,
-        kycVerified: user.kycVerified,
-        kycVerifiedAt: user.kycVerifiedAt,
-        kycNotes: user.kycNotes,
-        createdAt: user.createdAt,
-        updatedAt: user.updatedAt,
-      },
+      data: serializeUserProfile(user),
     });
   } catch (error) {
     console.error("Error fetching user profile:", error);
@@ -154,18 +151,37 @@ export const getAccountSummary = async (req, res, next) => {
 export const updateUserProfile = async (req, res, next) => {
   try {
     const userId = req.user._id;
-    const { firstName, lastName, phone, address } = req.body;
+    const { firstName, lastName, phone, phoneNumber, address, country } =
+      req.body;
+
+    const existing = await User.findById(userId).select("address").lean();
+
+    const resolvedPhone = phone ?? phoneNumber;
+
+    const $set = {
+      firstName,
+      lastName,
+      phone: resolvedPhone,
+      country,
+    };
+
+    if (typeof address === "string") {
+      // If legacy users have `address` stored as a string, MongoDB can't set `address.street`.
+      // In that case replace `address` with an object.
+      if (typeof existing?.address === "string") {
+        $set.address = { street: address };
+      } else {
+        $set["address.street"] = address;
+      }
+    } else if (address && typeof address === "object") {
+      $set.address = address;
+    }
 
     // Find user and update
     const user = await User.findByIdAndUpdate(
       userId,
       {
-        $set: {
-          firstName,
-          lastName,
-          phone,
-          address,
-        },
+        $set,
       },
       { new: true, runValidators: true },
     ).select("-password -resetToken -resetTokenExpiry");
@@ -176,7 +192,7 @@ export const updateUserProfile = async (req, res, next) => {
 
     res.status(200).json({
       success: true,
-      data: user,
+      data: serializeUserProfile(user),
       message: "Profile updated successfully",
     });
   } catch (error) {
@@ -194,9 +210,8 @@ export const uploadProfileImage = async (req, res, next) => {
       throw new ApiError("No image file uploaded", 400);
     }
 
-    // Get file path and create URL
-    const filePath = req.file.path.replace(/\\/g, "/"); // Replace backslashes with forward slashes
-    const imageUrl = `${req.protocol}://${req.get("host")}/${filePath}`;
+    // Upload to Supabase (or local fallback) and store public URL
+    const imageUrl = await uploadToS3(req.file, "profile-images");
 
     // Update user with new image URL
     const user = await User.findByIdAndUpdate(
@@ -216,8 +231,10 @@ export const uploadProfileImage = async (req, res, next) => {
     res.status(200).json({
       success: true,
       data: {
+        ...serializeUserProfile(user),
+        // Keep these for backward compatibility
+        profileImage: imageUrl,
         imageUrl,
-        user,
       },
       message: "Profile image uploaded successfully",
     });

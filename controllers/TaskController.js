@@ -40,7 +40,7 @@ const DEFAULT_TASKS = [
     title: "Complete Your Profile",
     description: "Add your profile picture and complete all profile details",
     category: "profile",
-    reward: 5,
+    reward: 2,
     rewardType: "cash",
     difficulty: "easy",
     requirements: {
@@ -50,36 +50,6 @@ const DEFAULT_TASKS = [
     isActive: true,
     maxCompletions: 1,
     tags: ["beginner", "profile", "onboarding"],
-  },
-  {
-    title: "Verify Your Email",
-    description: "Verify your email address to secure your account",
-    category: "account",
-    reward: 3,
-    rewardType: "cash",
-    difficulty: "easy",
-    requirements: {
-      emailVerified: true,
-    },
-    duration: 3,
-    isActive: true,
-    maxCompletions: 1,
-    tags: ["beginner", "security"],
-  },
-  {
-    title: "Enable Two-Factor Authentication",
-    description: "Add an extra layer of security to your account",
-    category: "security",
-    reward: 8,
-    rewardType: "cash",
-    difficulty: "easy",
-    requirements: {
-      twoFactorEnabled: true,
-    },
-    duration: 7,
-    isActive: true,
-    maxCompletions: 1,
-    tags: ["security", "2fa"],
   },
   {
     title: "Make Your First Deposit",
@@ -97,19 +67,49 @@ const DEFAULT_TASKS = [
     tags: ["beginner", "deposit", "onboarding"],
   },
   {
-    title: "Follow Us on Social Media",
-    description: "Follow our official social media channels for updates",
-    category: "social",
-    reward: 2,
+    title: "Deposit $100+",
+    description: "Make a deposit of $100 or more",
+    category: "deposit",
+    reward: 50,
     rewardType: "cash",
     difficulty: "easy",
     requirements: {
-      socialFollow: true,
+      minAmount: 100,
     },
-    duration: 7,
+    duration: 14,
     isActive: true,
     maxCompletions: 1,
-    tags: ["social", "engagement"],
+    tags: ["deposit", "bonus"],
+  },
+  {
+    title: "Deposit $200+",
+    description: "Make a deposit of $200 or more",
+    category: "deposit",
+    reward: 100,
+    rewardType: "cash",
+    difficulty: "medium",
+    requirements: {
+      minAmount: 200,
+    },
+    duration: 14,
+    isActive: true,
+    maxCompletions: 1,
+    tags: ["deposit", "bonus"],
+  },
+  {
+    title: "Deposit $500+",
+    description: "Make a deposit of $500 or more",
+    category: "deposit",
+    reward: 200,
+    rewardType: "cash",
+    difficulty: "medium",
+    requirements: {
+      minAmount: 500,
+    },
+    duration: 14,
+    isActive: true,
+    maxCompletions: 1,
+    tags: ["deposit", "bonus"],
   },
   {
     title: "Place Your First Order",
@@ -160,7 +160,7 @@ const DEFAULT_TASKS = [
     title: "Daily Login Bonus",
     description: "Log in to your account daily to earn rewards",
     category: "engagement",
-    reward: 1,
+    reward: 0.001,
     rewardType: "cash",
     difficulty: "easy",
     requirements: {
@@ -237,10 +237,10 @@ const DEFAULT_TASKS = [
     tags: ["referral", "friends"],
   },
   {
-    title: "Complete 5 Educational Modules",
+    title: "Complete 15 Educational Modules",
     description: "Learn about trading by completing 5 educational modules",
     category: "educational",
-    reward: 15,
+    reward: 5,
     rewardType: "cash",
     difficulty: "easy",
     requirements: {
@@ -255,8 +255,8 @@ const DEFAULT_TASKS = [
     title: "Deposit Challenge",
     description: "Make a deposit of $1,000 or more",
     category: "deposit",
-    reward: 50,
-    rewardType: "bonus",
+    reward: 500,
+    rewardType: "cash",
     difficulty: "medium",
     requirements: {
       minAmount: 1000,
@@ -268,11 +268,110 @@ const DEFAULT_TASKS = [
   },
 ];
 
+const DEPOSIT_TIER_TASKS = [
+  {
+    title: "Make Your First Deposit",
+    description: "Deposit at least $50 to start trading",
+    category: "deposit",
+    reward: 10,
+    rewardType: "cash",
+    difficulty: "easy",
+    requirements: { minAmount: 50 },
+    duration: 14,
+    isActive: true,
+    maxCompletions: 1,
+    tags: ["beginner", "deposit", "onboarding"],
+  },
+  {
+    title: "Deposit $100+",
+    description: "Make a deposit of $100 or more",
+    category: "deposit",
+    reward: 50,
+    rewardType: "cash",
+    difficulty: "easy",
+    requirements: { minAmount: 100 },
+    duration: 14,
+    isActive: true,
+    maxCompletions: 1,
+    tags: ["deposit", "bonus"],
+  },
+  {
+    title: "Deposit $200+",
+    description: "Make a deposit of $200 or more",
+    category: "deposit",
+    reward: 100,
+    rewardType: "cash",
+    difficulty: "medium",
+    requirements: { minAmount: 200 },
+    duration: 14,
+    isActive: true,
+    maxCompletions: 1,
+    tags: ["deposit", "bonus"],
+  },
+  {
+    title: "Deposit $500+",
+    description: "Make a deposit of $500 or more",
+    category: "deposit",
+    reward: 200,
+    rewardType: "cash",
+    difficulty: "medium",
+    requirements: { minAmount: 500 },
+    duration: 14,
+    isActive: true,
+    maxCompletions: 1,
+    tags: ["deposit", "bonus"],
+  },
+  {
+    title: "Deposit Challenge",
+    description: "Make a deposit of $1,000 or more",
+    category: "deposit",
+    reward: 500,
+    rewardType: "cash",
+    difficulty: "medium",
+    requirements: { minAmount: 1000 },
+    duration: 14,
+    isActive: true,
+    maxCompletions: 1,
+    tags: ["deposit", "bonus"],
+  },
+];
+
+const ensureDepositTierTasks = async () => {
+  await Promise.all(
+    DEPOSIT_TIER_TASKS.map(async (task) => {
+      const minAmount = task.requirements?.minAmount;
+      // Upsert by title+category to be deterministic and idempotent.
+      await Task.updateOne(
+        { title: task.title, category: task.category },
+        { $setOnInsert: { ...task, position: 0 } },
+        { upsert: true },
+      );
+
+      // Backstop: if someone renamed the title, still ensure the tier exists by minAmount.
+      if (typeof minAmount === "number") {
+        await Task.updateOne(
+          {
+            category: task.category,
+            "requirements.minAmount": minAmount,
+          },
+          { $setOnInsert: { ...task, position: 0 } },
+          { upsert: true },
+        );
+      }
+    }),
+  );
+};
+
 // Get all available tasks
 export const getAllTasks = async (req, res, next) => {
   try {
     const { category, difficulty, status } = req.query;
     const query = { isActive: true };
+    try {
+      await ensureDepositTierTasks();
+    } catch (syncErr) {
+      logger.warn(`Task sync warning: ${syncErr.message}`);
+    }
 
     if (category) {
       query.category = category;
@@ -285,14 +384,18 @@ export const getAllTasks = async (req, res, next) => {
     // Fetch tasks
     const tasks = await Task.find(query).sort({ position: 1 });
 
-    // If there are no tasks, initialize with default tasks
-    if (tasks.length === 0) {
-      await Task.insertMany(DEFAULT_TASKS);
+    // Ensure default tasks exist — if DB has fewer tasks than our defaults, insert missing defaults
+    if (tasks.length < DEFAULT_TASKS.length) {
+      const existingTitles = tasks.map(t => t.title);
+      const missingDefaults = DEFAULT_TASKS.filter(dt => !existingTitles.includes(dt.title));
+      if (missingDefaults.length > 0) {
+      await Task.insertMany(missingDefaults);
+      }
       const initializedTasks = await Task.find(query).sort({ position: 1 });
       
       return res.status(200).json({
-        success: true,
-        data: initializedTasks,
+      success: true,
+      data: initializedTasks,
       });
     }
 
@@ -988,6 +1091,7 @@ const mapEventTypeToCategory = (eventType) => {
     'combo_created': 'combo',
     'combo_completed': 'combo',
     'deposit_made': 'deposit',
+    'deposit_approved': 'deposit',
     'withdrawal_made': 'withdrawal',
     'trade_executed': 'trading',
     'kyc_submitted': 'kyc',

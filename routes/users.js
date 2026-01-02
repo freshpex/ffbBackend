@@ -72,7 +72,7 @@ router.get(
 );
 router.post(
   "/payment-methods",
-  asyncHandler(UserPaymentMethodsController.addCard),
+  asyncHandler(UserPaymentMethodsController.addPaymentMethod),
 ); // Added generic payment method POST route
 router.post(
   "/payment-methods/bank",

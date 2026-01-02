@@ -7,11 +7,11 @@ import config from '../config/config.js';
 
 class MarketDataService {
   constructor() {
-    this.mockData = config.marketData?.useMockData || false;
-    this.usingExchangeAPI = config.binance?.apiKey && config.binance.apiKey !== '';
+    this.mockData = !!config.marketData?.useMockData;
     this.prices = {};
     this.lastUpdated = {};
     this.updateInterval = 30000; // 30 seconds cache time
+    this.maxStaleMs = 5 * 60 * 1000; // 5 minutes
   }
 
   // Get current price for a symbol
@@ -19,7 +19,15 @@ class MarketDataService {
     try {
       if (!symbol) {
         logger.error('Symbol is required for getPrice');
-        return null;
+        throw new Error('Symbol is required');
+      }
+
+      // If mock data is explicitly enabled, always use a mock price.
+      if (this.mockData) {
+        const mock = this.getMockPrice(symbol);
+        this.prices[symbol] = mock;
+        this.lastUpdated[symbol] = Date.now();
+        return mock;
       }
 
       const now = Date.now();
@@ -35,7 +43,7 @@ class MarketDataService {
       let price = null;
       
       // Attempt to get from Binance first for crypto
-      if (this.isCryptoSymbol(symbol) && this.usingExchangeAPI) {
+      if (this.isCryptoSymbol(symbol)) {
         try {
           // Format symbol for Binance if needed (e.g., BTC/USDT -> BTCUSDT)
           const formattedSymbol = this.formatSymbolForExchange(symbol, "binance");
@@ -50,7 +58,7 @@ class MarketDataService {
       }
       
       // If Binance failed, try CryptoCompare for crypto
-      if (!price && this.isCryptoSymbol(symbol)) {
+      if (!price && this.isCryptoSymbol(symbol) && cryptoCompareService.isConfigured()) {
         try {
           const cryptoSymbol = symbol.split('/')[0];
           const quoteSymbol = symbol.split('/')[1] || 'USD';
@@ -77,25 +85,43 @@ class MarketDataService {
       }
       
       // Try coin market cap
-      if (!price && this.isCryptoSymbol(symbol)) {
-          try {
-            const cmcPrice = await coinMarketCapService.getPrice(symbol);
-            if (typeof cmcPrice === 'number' && Number.isFinite(cmcPrice) && cmcPrice > 0) {
-              price = cmcPrice;
-              logger.debug(`CoinMarketCap price for ${symbol}: ${price}`);
-            }
-          } catch (err) {
-            logger.warn(`CoinMarketCap fallback failed for ${symbol}: ${err.message}`);
+      if (!price && this.isCryptoSymbol(symbol) && coinMarketCapService.isConfigured()) {
+        try {
+          const cmcPrice = await coinMarketCapService.getPrice(symbol);
+          if (typeof cmcPrice === 'number' && Number.isFinite(cmcPrice) && cmcPrice > 0) {
+            price = cmcPrice;
+            logger.debug(`CoinMarketCap price for ${symbol}: ${price}`);
           }
+        } catch (err) {
+          logger.warn(`CoinMarketCap fallback failed for ${symbol}: ${err.message}`);
         }
+      }
 
-      this.prices[symbol] = price;
-      this.lastUpdated[symbol] = now;
+      // Validate and store cache. Never cache null/invalid.
+      if (typeof price === 'number' && Number.isFinite(price) && price > 0) {
+        this.prices[symbol] = price;
+        this.lastUpdated[symbol] = now;
+        return price;
+      }
 
-      return price;
+      // If we couldn't fetch a fresh price, return a recently cached price (stale-but-reasonable)
+      const cached = this.prices[symbol];
+      const cachedAt = this.lastUpdated[symbol];
+      if (typeof cached === 'number' && Number.isFinite(cached) && cachedAt && now - cachedAt <= this.maxStaleMs) {
+        logger.warn(`Using stale cached price for ${symbol} (age ${now - cachedAt}ms)`);
+        return cached;
+      }
+
+      // No price available in production mode: fail loudly.
+      throw new Error(`Unable to determine valid price for ${symbol}`);
     } catch (error) {
-      logger.error(`Error fetching price for ${symbol}:`, error);
-      return this.getMockPrice(symbol);
+      logger.error(`Error fetching price for ${symbol}:`, {
+        message: error?.message,
+        stack: error?.stack,
+      });
+
+      // Only return mock in explicit mock mode (handled above). Otherwise propagate.
+      throw error;
     }
   }
 

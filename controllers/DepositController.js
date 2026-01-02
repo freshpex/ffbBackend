@@ -96,6 +96,15 @@ export const createDeposit = async (req, res, next) => {
       );
     }
 
+    // Enforce minimum deposit amount
+    if (parseFloat(amount) < 50) {
+      throw new ApiError(
+        "Minimum deposit amount is 50",
+        400,
+        "validation_error",
+      );
+    }
+
     // Validate method
     if (!method) {
       throw new ApiError("Payment method is required", 400, "validation_error");
@@ -144,19 +153,8 @@ export const createDeposit = async (req, res, next) => {
     // Commit transaction
     await session.commitTransaction();
 
-    // Process task events after successful deposit creation
-    try {
-      await processTaskEvent(req.user._id, "deposit_made", {
-        depositId: deposit._id,
-        amount: parseFloat(amount),
-        currency,
-        method,
-        status: "pending"
-      });
-    } catch (eventError) {
-      // Log the error but don't affect the response
-      logger.error(`Error processing task events for deposit: ${eventError.message}`);
-    }
+    // NOTE: Deposit-related tasks are processed on approval (deposit_approved)
+    // to avoid rewarding pending/uncredited deposits.
 
     res.status(201).json({
       success: true,
@@ -230,7 +228,7 @@ export const getDepositMethods = async (req, res, next) => {
         id: "cryptocurrency",
         name: "Cryptocurrency",
         icon: "bitcoin",
-        minAmount: 20,
+        minAmount: 50,
         maxAmount: 100000,
         cryptoOptions: [
           {

@@ -162,12 +162,14 @@ const cryptoCompareService = {
       throw new Error(`Price not available for ${fromSymbol}/${toSymbol}`);
     } catch (error) {
       logger.warn(`CryptoCompare getPrice error for ${fromSymbol}/${toSymbol}: ${error.message}`);
-      logger.warn(`Using fallback mock price for ${fromSymbol}/${toSymbol}: ${error.message}`);
-      const mockPrice = cryptoCompareService.getMockPrice(fromSymbol, toSymbol);
-      return {
-        symbol: fromSymbol.replace('/', ''),
-        price: mockPrice.toFixed(2)
-      };
+      // Do NOT silently use mock prices unless explicitly enabled.
+      if (process.env.USE_MOCK_DATA === 'true') {
+        logger.warn(`Using mock price for ${fromSymbol}/${toSymbol} because USE_MOCK_DATA=true`);
+        const mockPrice = cryptoCompareService.getMockPrice(fromSymbol, toSymbol);
+        return mockPrice;
+      }
+
+      throw error;
     }
   },
 
@@ -215,18 +217,11 @@ const cryptoCompareService = {
    * @returns {Promise<Object>} Price data
    */
   getCurrentPrice: async (fromSymbol, toSymbols) => {
-    try {
-      const toSymbolsStr = Array.isArray(toSymbols)
-        ? toSymbols.join(",")
-        : toSymbols;
-
-      return await cryptoCompareService.executeRequest("price", {
-        fsym: fromSymbol,
-        tsyms: toSymbolsStr,
-      });
-    } catch (error) {
-      logger.warn(`CryptoCompare getCurrentPrice failed for ${fromSymbol}: ${error.message}`);
-    }
+    const toSymbolsStr = Array.isArray(toSymbols) ? toSymbols.join(",") : toSymbols;
+    return await cryptoCompareService.executeRequest("price", {
+      fsym: fromSymbol,
+      tsyms: toSymbolsStr,
+    });
   },
 
   /**

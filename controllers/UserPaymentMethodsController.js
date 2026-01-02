@@ -4,6 +4,83 @@ import mongoose from "mongoose";
 import logger from "../middleware/logger.js";
 import { ApiError } from "../middleware/errorHandler.js";
 
+const toNumberOrNull = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+const getLast4 = (maskedOrFull) => {
+  if (!maskedOrFull) return undefined;
+  const digits = String(maskedOrFull).replace(/\D/g, "");
+  return digits.length >= 4 ? digits.slice(-4) : undefined;
+};
+
+const maskAccountNumber = (accountNumber) => {
+  if (!accountNumber) return undefined;
+  const digits = String(accountNumber).replace(/\s/g, "");
+  const last4 = digits.slice(-4);
+  return `****${last4}`;
+};
+
+const normalizePaymentMethod = (pm) => {
+  if (!pm) return pm;
+
+  const details = pm.details || {};
+
+  // Base fields
+  const normalized = {
+    id: pm.id || pm._id,
+    type: pm.type,
+    name: pm.nickname,
+    nickname: pm.nickname,
+    isDefault: !!pm.isDefault,
+    status: pm.status,
+    addedAt: pm.addedAt,
+    createdAt: pm.createdAt,
+    updatedAt: pm.updatedAt,
+  };
+
+  if (pm.type === "card") {
+    const expiryMonth = toNumberOrNull(details.expiryMonth);
+    const expiryYear = toNumberOrNull(details.expiryYear);
+    const cardNumberMasked = details.cardNumber;
+
+    return {
+      ...normalized,
+      cardholderName: details.cardholderName,
+      last4: getLast4(cardNumberMasked),
+      expiryMonth: expiryMonth ?? undefined,
+      expiryYear: expiryYear ?? undefined,
+      cardNumberMasked,
+    };
+  }
+
+  if (pm.type === "bank_account") {
+    const accountNumberMasked = maskAccountNumber(details.accountNumber);
+    return {
+      ...normalized,
+      bankName: details.bankName,
+      accountName: details.accountName,
+      last4: getLast4(details.accountNumber),
+      routingNumber: details.routingNumber,
+      bankAddress: details.bankAddress,
+      swiftCode: details.swiftCode,
+      accountNumberMasked,
+    };
+  }
+
+  if (pm.type === "crypto_wallet") {
+    return {
+      ...normalized,
+      walletType: details.cryptocurrency,
+      walletAddress: details.walletAddress,
+      network: details.network,
+    };
+  }
+
+  return normalized;
+};
+
 // Get user payment methods
 export const getUserPaymentMethods = async (req, res, next) => {
   try {
@@ -11,10 +88,35 @@ export const getUserPaymentMethods = async (req, res, next) => {
 
     res.status(200).json({
       success: true,
-      data: paymentMethods,
+      data: paymentMethods.map(normalizePaymentMethod),
     });
   } catch (error) {
     logger.error("Error fetching payment methods:", error);
+    next(error);
+  }
+};
+
+// Add payment method (generic route used by frontend)
+export const addPaymentMethod = async (req, res, next) => {
+  try {
+    const { type } = req.body;
+
+    if (!type) {
+      throw new ApiError("Payment method type is required", 400, "validation_error");
+    }
+
+    if (type === "card") {
+      return addCard(req, res, next);
+    }
+    if (type === "bank_account") {
+      return addBankAccount(req, res, next);
+    }
+    if (type === "crypto_wallet") {
+      return addCryptoWallet(req, res, next);
+    }
+
+    throw new ApiError("Unsupported payment method type", 400, "validation_error");
+  } catch (error) {
     next(error);
   }
 };
@@ -70,7 +172,7 @@ export const addBankAccount = async (req, res, next) => {
     res.status(201).json({
       success: true,
       message: "Bank account added successfully",
-      data: bankAccount,
+      data: normalizePaymentMethod(bankAccount),
     });
   } catch (error) {
     logger.error("Error adding bank account:", error);
@@ -118,7 +220,7 @@ export const addCryptoWallet = async (req, res, next) => {
     res.status(201).json({
       success: true,
       message: "Cryptocurrency wallet added successfully",
-      data: cryptoWallet,
+      data: normalizePaymentMethod(cryptoWallet),
     });
   } catch (error) {
     logger.error("Error adding cryptocurrency wallet:", error);
@@ -196,7 +298,7 @@ export const addCard = async (req, res, next) => {
     res.status(201).json({
       success: true,
       message: "Card added successfully",
-      data: card,
+      data: normalizePaymentMethod(card),
     });
   } catch (error) {
     logger.error("Error adding card:", error);
@@ -208,7 +310,27 @@ export const addCard = async (req, res, next) => {
 export const updatePaymentMethod = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { nickname } = req.body;
+    const {
+      nickname,
+      // card
+      cardholderName,
+      expiryMonth,
+      expiryYear,
+      // bank
+      accountName,
+      bankName,
+      routingNumber,
+      bankAddress,
+      swiftCode,
+      // crypto
+      walletType,
+      walletAddress,
+      network,
+      // explicitly disallow sensitive fields
+      cardNumber,
+      cvv,
+      accountNumber,
+    } = req.body;
 
     const paymentMethod = await PaymentMethod.findOne({
       _id: id,
@@ -219,8 +341,41 @@ export const updatePaymentMethod = async (req, res, next) => {
       throw new ApiError("Payment method not found", 404, "not_found");
     }
 
+    if (cardNumber || cvv || accountNumber) {
+      throw new ApiError(
+        "Updating full card/account numbers or CVV is not supported",
+        400,
+        "validation_error",
+      );
+    }
+
     if (nickname) {
       paymentMethod.nickname = nickname;
+    }
+
+    // Update allowed details by type
+    if (!paymentMethod.details || typeof paymentMethod.details !== "object") {
+      paymentMethod.details = {};
+    }
+
+    if (paymentMethod.type === "card") {
+      if (cardholderName) paymentMethod.details.cardholderName = cardholderName;
+      if (expiryMonth) paymentMethod.details.expiryMonth = String(expiryMonth);
+      if (expiryYear) paymentMethod.details.expiryYear = String(expiryYear);
+    }
+
+    if (paymentMethod.type === "bank_account") {
+      if (accountName) paymentMethod.details.accountName = accountName;
+      if (bankName) paymentMethod.details.bankName = bankName;
+      if (routingNumber) paymentMethod.details.routingNumber = routingNumber;
+      if (bankAddress) paymentMethod.details.bankAddress = bankAddress;
+      if (swiftCode) paymentMethod.details.swiftCode = swiftCode;
+    }
+
+    if (paymentMethod.type === "crypto_wallet") {
+      if (walletType) paymentMethod.details.cryptocurrency = walletType;
+      if (walletAddress) paymentMethod.details.walletAddress = walletAddress;
+      if (network) paymentMethod.details.network = network;
     }
 
     await paymentMethod.save();
@@ -228,7 +383,7 @@ export const updatePaymentMethod = async (req, res, next) => {
     res.status(200).json({
       success: true,
       message: "Payment method updated successfully",
-      data: paymentMethod,
+      data: normalizePaymentMethod(paymentMethod),
     });
   } catch (error) {
     logger.error(`Error updating payment method ${req.params.id}:`, error);
@@ -269,7 +424,7 @@ export const setDefaultPaymentMethod = async (req, res, next) => {
     res.status(200).json({
       success: true,
       message: "Default payment method updated successfully",
-      data: paymentMethod,
+      data: normalizePaymentMethod(paymentMethod),
     });
   } catch (error) {
     await session.abortTransaction();
@@ -333,6 +488,7 @@ export const deletePaymentMethod = async (req, res, next) => {
 
 export default {
   getUserPaymentMethods,
+  addPaymentMethod,
   addBankAccount,
   addCryptoWallet,
   addCard,

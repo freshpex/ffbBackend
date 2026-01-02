@@ -76,6 +76,11 @@ const userSchema = new mongoose.Schema(
       trim: true,
       lowercase: true,
     },
+    username: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     password: {
       type: String,
       required: function () {
@@ -89,6 +94,10 @@ const userSchema = new mongoose.Schema(
     lastName: {
       type: String,
       trim: true,
+    },
+    profileImage: {
+      type: String,
+      default: "",
     },
     role: {
       type: String,

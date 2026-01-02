@@ -13,7 +13,7 @@ const taskSchema = new mongoose.Schema(
     },
     category: {
       type: String,
-      enum: ["order", "combo", "deposit", "trading", "kyc", "referral", "social", "educational"],
+      enum: ["order", "combo", "deposit", "trading", "kyc", "referral", "social", "educational", "profile", "engagement"],
       required: true,
     },
     reward: {
