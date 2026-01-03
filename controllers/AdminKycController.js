@@ -5,6 +5,7 @@ import logger from "../middleware/logger.js";
 import { ApiError } from "../middleware/errorHandler.js";
 import { createKycNotification } from "../services/notificationService.js";
 import AdminNotification from "../models/AdminNotification.js";
+import { syncKycTasksForUser } from "./TaskController.js";
 
 // Get all KYC requests with filtering and pagination
 export const getAllKycRequests = async (req, res, next) => {
@@ -136,6 +137,12 @@ export const approveKycRequest = async (req, res, next) => {
       },
       { new: true, session, runValidators: true },
     );
+
+    try {
+      await syncKycTasksForUser(user._id, { session });
+    } catch (e) {
+      logger.warn(`KYC task sync warning: ${e.message}`);
+    }
     await createKycNotification(kycRequest, user);
     await session.commitTransaction();
 

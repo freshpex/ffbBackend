@@ -7,6 +7,83 @@ import mongoose from "mongoose";
 import logger from "../middleware/logger.js";
 import { ApiError } from "../middleware/errorHandler.js";
 
+// Keep certain tasks in sync with user account flags (e.g., KYC)
+export const syncKycTasksForUser = async (userId, { session } = {}) => {
+  if (!userId) return;
+
+  const userQuery = User.findById(userId).select("kycVerified kycStatus");
+  if (session) userQuery.session(session);
+  const user = await userQuery;
+  if (!user) return;
+
+  const isApproved = user.kycVerified === true || user.kycStatus === "approved";
+  const isPending = user.kycStatus === "pending";
+
+  if (!isApproved && !isPending) return;
+
+  const tasksQuery = Task.find({ category: "kyc", isActive: true });
+  if (session) tasksQuery.session(session);
+  const kycTasks = await tasksQuery;
+
+  if (!kycTasks || kycTasks.length === 0) return;
+
+  for (const task of kycTasks) {
+    const utQuery = UserTask.findOne({ user: userId, task: task._id });
+    if (session) utQuery.session(session);
+    const existing = await utQuery;
+
+    // Never downgrade or overwrite claimed tasks
+    if (existing && existing.status === "claimed") continue;
+
+    if (isApproved) {
+      if (!existing) {
+        const ut = new UserTask({
+          user: userId,
+          task: task._id,
+          status: "completed",
+          progress: 100,
+          startedAt: new Date(),
+          completedAt: new Date(),
+          relatedData: { kycStatus: "approved" },
+        });
+        await ut.save(session ? { session } : undefined);
+      } else if (existing.status !== "completed" || existing.progress < 100) {
+        existing.status = "completed";
+        existing.progress = 100;
+        existing.completedAt = existing.completedAt || new Date();
+        existing.relatedData = {
+          ...(existing.relatedData || {}),
+          kycStatus: "approved",
+        };
+        await existing.save(session ? { session } : undefined);
+      }
+    } else if (isPending) {
+      if (!existing) {
+        const ut = new UserTask({
+          user: userId,
+          task: task._id,
+          status: "in_progress",
+          progress: 50,
+          startedAt: new Date(),
+          relatedData: { kycStatus: "pending" },
+        });
+        await ut.save(session ? { session } : undefined);
+      } else {
+        // Only move forward
+        if (existing.progress < 50) existing.progress = 50;
+        if (existing.status !== "in_progress" && existing.status !== "completed") {
+          existing.status = "in_progress";
+        }
+        existing.relatedData = {
+          ...(existing.relatedData || {}),
+          kycStatus: "pending",
+        };
+        await existing.save(session ? { session } : undefined);
+      }
+    }
+  }
+};
+
 // Helper function to create notifications
 const createNotification = async (userId, title, message, type, metadata = {}, session) => {
   const notification = new Notification({
@@ -160,7 +237,7 @@ const DEFAULT_TASKS = [
     title: "Daily Login Bonus",
     description: "Log in to your account daily to earn rewards",
     category: "engagement",
-    reward: 0.001,
+    reward: 0.01,
     rewardType: "cash",
     difficulty: "easy",
     requirements: {
@@ -402,6 +479,11 @@ export const getAllTasks = async (req, res, next) => {
     // Get user's tasks to determine status
     let userTasks = [];
     if (req.user) {
+      try {
+        await syncKycTasksForUser(req.user._id);
+      } catch (syncErr) {
+        logger.warn(`KYC task sync warning: ${syncErr.message}`);
+      }
       userTasks = await UserTask.find({ user: req.user._id });
     }
 
@@ -484,6 +566,13 @@ export const getUserTasks = async (req, res, next) => {
   try {
     const { status, category } = req.query;
     const query = { user: req.user._id };
+
+    // Ensure auto-synced tasks (like KYC) are reflected even if user never manually started them
+    try {
+      await syncKycTasksForUser(req.user._id);
+    } catch (syncErr) {
+      logger.warn(`KYC task sync warning: ${syncErr.message}`);
+    }
     
     if (status) {
       query.status = status;
@@ -818,6 +907,13 @@ export const claimTaskReward = async (req, res, next) => {
 export const getTaskStatistics = async (req, res, next) => {
   try {
     const userId = req.user._id;
+
+    // Ensure auto-synced tasks are included in stats
+    try {
+      await syncKycTasksForUser(userId);
+    } catch (syncErr) {
+      logger.warn(`KYC task sync warning: ${syncErr.message}`);
+    }
     
     // Get all user tasks
     const userTasks = await UserTask.find({ user: userId }).populate("task");

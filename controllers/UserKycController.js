@@ -5,6 +5,7 @@ import logger from "../middleware/logger.js";
 import { ApiError } from "../middleware/errorHandler.js";
 import { uploadToS3 } from "../services/storageService.js";
 import { createKycNotification } from "../services/notificationService.js";
+import { syncKycTasksForUser } from "./TaskController.js";
 
 // Submit KYC verification request
 export const submitKyc = async (req, res, next) => {
@@ -157,6 +158,13 @@ export const submitKyc = async (req, res, next) => {
       },
       { new: true, session, runValidators: true },
     ).select("firstName lastName email");
+
+    try {
+      await syncKycTasksForUser(userId, { session });
+    } catch (e) {
+      // don't block KYC submission if task sync fails
+      logger.warn(`KYC task sync warning: ${e.message}`);
+    }
 
     // Create notification for admin
     const fullName =

@@ -9,7 +9,18 @@ const transactionSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ["deposit", "withdrawal", "transfer", "investment", "fee", "bonus"],
+      enum: [
+        "deposit",
+        "withdrawal",
+        "transfer",
+        "investment",
+        "fee",
+        "bonus",
+        // shop-related transaction types
+        "shop_purchase",
+        "shop_reward",
+        "shop_refund",
+      ],
       required: true,
     },
     amount: {

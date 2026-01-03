@@ -31,6 +31,9 @@ import tradingRouter from "./routes/trading.js";
 import visitorRouter from "./routes/visitors.js";
 import tasksRouter from "./routes/tasks.js";
 import kycRouter from "./routes/kyc.js";
+import productsRouter from "./routes/products.js";
+import cartRouter from "./routes/cart.js";
+import shopOrdersRouter from "./routes/shopOrders.js";
 
 // Initialize Express app
 const app = express();
@@ -78,8 +81,10 @@ app.use("/api/admin/analytics", adminAnalyticsRouter);
 app.use("/api/trading", tradingRouter);
 app.use("/api/tracking", visitorRouter);
 app.use("/api/tasks", tasksRouter);
-// KYC routes (user-facing)
 app.use("/api/users/kyc", kycRouter);
+app.use("/api/products", productsRouter);
+app.use("/api/cart", cartRouter);
+app.use("/api/shop/orders", shopOrdersRouter);
 
 // Error handling middleware
 app.use(errorHandler);
