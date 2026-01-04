@@ -113,6 +113,10 @@ const userSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    bonusBalance: {
+      type: Number,
+      default: 0,
+    },
     kycVerified: {
       type: Boolean,
       default: false,

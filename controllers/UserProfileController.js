@@ -2,6 +2,7 @@ import User from "../models/User.js";
 import Investment from "../models/Investment.js";
 import Transaction from "../models/Transaction.js";
 import multer from "multer";
+import mongoose from "mongoose";
 import { ApiError } from "../middleware/errorHandler.js";
 import logger from "../middleware/logger.js";
 import { uploadToS3 } from "../services/storageService.js";
@@ -47,6 +48,7 @@ const serializeUserProfile = (user) => {
     address: addressValue,
     country: user.country || "",
     balance: user.balance || 0,
+    bonusBalance: user.bonusBalance || 0,
     accountBalance: user.balance || 0,
     kycStatus: user.kycStatus,
     kycVerified: user.kycVerified,
@@ -55,6 +57,154 @@ const serializeUserProfile = (user) => {
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };
+};
+
+const BONUS_CONVERSION_MIN_DEPOSIT = 300;
+
+const getUserIdFromReq = (req) => req.user?._id || req.user?.id;
+
+const getCompletedDepositTotal = async (userId, session) => {
+  const matchUserId =
+    typeof userId === "string" ? new mongoose.Types.ObjectId(userId) : userId;
+
+  const pipeline = [
+    {
+      $match: {
+        user: matchUserId,
+        type: "deposit",
+        status: "completed",
+        currency: { $in: ["USD", "USDT"] },
+      },
+    },
+    { $group: { _id: null, total: { $sum: "$amount" } } },
+  ];
+
+  const query = Transaction.aggregate(pipeline);
+  if (session) query.session(session);
+
+  const agg = await query;
+
+  return agg[0]?.total || 0;
+};
+
+export const getBonusConversionStatus = async (req, res, next) => {
+  try {
+    const userId = getUserIdFromReq(req);
+    if (!userId) throw new ApiError("Unauthorized", 401, "unauthorized");
+
+    const [user, depositTotal] = await Promise.all([
+      User.findById(userId).select("balance bonusBalance").lean(),
+      getCompletedDepositTotal(userId),
+    ]);
+
+    if (!user) throw new ApiError("User not found", 404, "not_found");
+
+    const eligible = depositTotal >= BONUS_CONVERSION_MIN_DEPOSIT;
+
+    res.status(200).json({
+      success: true,
+      data: {
+        balance: user.balance || 0,
+        bonusBalance: user.bonusBalance || 0,
+        depositTotal,
+        minDepositRequired: BONUS_CONVERSION_MIN_DEPOSIT,
+        eligible,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const convertBonusBalance = async (req, res, next) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const userId = getUserIdFromReq(req);
+    if (!userId) throw new ApiError("Unauthorized", 401, "unauthorized");
+
+    const user = await User.findById(userId)
+      .select("balance bonusBalance")
+      .session(session);
+
+    if (!user) throw new ApiError("User not found", 404, "not_found");
+
+    const depositTotal = await getCompletedDepositTotal(userId, session);
+    if (depositTotal < BONUS_CONVERSION_MIN_DEPOSIT) {
+      throw new ApiError(
+        `You must have at least ${BONUS_CONVERSION_MIN_DEPOSIT} USDT in completed deposits before converting bonus balance`,
+        403,
+        "bonus_not_eligible",
+      );
+    }
+
+    const requestedAmount = req.body?.amount;
+    const amount =
+      requestedAmount === undefined || requestedAmount === null || requestedAmount === ""
+        ? Number(user.bonusBalance || 0)
+        : Number(requestedAmount);
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new ApiError("Valid conversion amount is required", 400, "validation_error");
+    }
+
+    if ((user.bonusBalance || 0) < amount) {
+      throw new ApiError("Insufficient bonus balance", 400, "insufficient_bonus_balance");
+    }
+
+    const updated = await User.findOneAndUpdate(
+      { _id: userId, bonusBalance: { $gte: amount } },
+      { $inc: { bonusBalance: -amount, balance: amount } },
+      { session, new: true },
+    );
+
+    if (!updated) {
+      throw new ApiError("Insufficient bonus balance", 400, "insufficient_bonus_balance");
+    }
+
+    await Transaction.create(
+      [
+        {
+          user: userId,
+          type: "bonus",
+          amount,
+          currency: "USD",
+          status: "completed",
+          method: "internal",
+          description: "Converted bonus balance to main balance",
+          processedAt: new Date(),
+          metadata: {
+            kind: "bonus_conversion",
+            depositTotal,
+            minDepositRequired: BONUS_CONVERSION_MIN_DEPOSIT,
+          },
+        },
+      ],
+      { session },
+    );
+
+    await session.commitTransaction();
+
+    res.status(200).json({
+      success: true,
+      message: "Bonus balance converted successfully",
+      data: {
+        convertedAmount: amount,
+        balance: updated.balance || 0,
+        bonusBalance: updated.bonusBalance || 0,
+        depositTotal,
+        minDepositRequired: BONUS_CONVERSION_MIN_DEPOSIT,
+        eligible: true,
+      },
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    logger.error("Error converting bonus balance:", error);
+    next(error);
+  } finally {
+    session.endSession();
+  }
 };
 
 export const getUserProfile = async (req, res) => {
@@ -129,10 +279,13 @@ export const getAccountSummary = async (req, res, next) => {
     // Create summary object
     const summary = {
       balance: user.balance || "N/A",
+      bonusBalance: user.bonusBalance || 0,
       investmentCount: investments.length,
       investmentTotal,
       depositTotal,
       withdrawalTotal,
+      bonusConversionEligible: depositTotal >= BONUS_CONVERSION_MIN_DEPOSIT,
+      bonusConversionMinDepositRequired: BONUS_CONVERSION_MIN_DEPOSIT,
       lastLogin: user.lastLoginAt,
       accountStatus: user.status,
       kycVerified: user.kycVerified,
@@ -276,4 +429,6 @@ export default {
   uploadProfileImage,
   getUserBalance,
   getAccountSummary,
+  getBonusConversionStatus,
+  convertBonusBalance,
 };

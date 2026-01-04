@@ -5,6 +5,8 @@ import UserProfileController, {
   getUserBalance,
   getUserProfile,
   getAccountSummary,
+  getBonusConversionStatus,
+  convertBonusBalance,
 } from "../controllers/UserProfileController.js";
 import UserSecurityController from "../controllers/UserSecurityController.js";
 import UserPaymentMethodsController from "../controllers/UserPaymentMethodsController.js";
@@ -99,5 +101,9 @@ router.delete(
   asyncHandler(UserPaymentMethodsController.deletePaymentMethod),
 );
 router.get("/balance", verifyToken, asyncHandler(getUserBalance));
+
+// Bonus balance routes
+router.get("/bonus/status", asyncHandler(getBonusConversionStatus));
+router.post("/bonus/convert", asyncHandler(convertBonusBalance));
 
 export default router;

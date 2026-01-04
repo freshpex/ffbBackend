@@ -40,7 +40,7 @@ export const getReferralCode = async (req, res, next) => {
       success: true,
       data: {
         referralCode: user.referralCode,
-        referralLink: `${process.env.FRONTEND_URL || "http://localhost:5172"}/register?ref=${user.referralCode}`,
+        referralLink: `${process.env.FRONTEND_URL || "http://localhost:5172"}/signup?ref=${user.referralCode}`,
       },
     });
   } catch (error) {
@@ -555,7 +555,7 @@ export const generateReferralLink = async (req, res, next) => {
     }
 
     const baseUrl = process.env.FRONTEND_URL || "https://ffbroker.vercel.app";
-    const referralLink = `${baseUrl}/register?ref=${user.referralCode}`;
+    const referralLink = `${baseUrl}/signup?ref=${user.referralCode}`;
 
     res.status(200).json({
       success: true,

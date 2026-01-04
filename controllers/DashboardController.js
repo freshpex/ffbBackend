@@ -72,11 +72,15 @@ export const getAccountSummary = async (req, res, next) => {
     // Format data for response
     const accountSummary = {
       availableBalance: user.balance || "N/A",
+      bonusBalance: user.bonusBalance || 0,
       totalInvestments,
       totalAssets: totalBalance + totalInvestments,
       projectedEarnings,
       totalDeposits: totalDeposits[0]?.total || 0,
       totalWithdrawals: totalWithdrawals[0]?.total || 0,
+      bonusConversionEligible:
+        (totalDeposits[0]?.total || 0) >= 300,
+      bonusConversionMinDepositRequired: 300,
       currency: "USD",
       accountNumber: user.accountNumber || "N/A",
       accountType: user.accountType || "Standard",
