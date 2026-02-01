@@ -162,7 +162,7 @@ const checkAndCreateAdmin = async () => {
       console.log("No admin users found. Creating a new admin user...");
 
       // Create admin user with known credentials
-      const adminEmail = "admin@example.com";
+      const adminEmail = "admin@ffb.com";
       const adminPassword = "admin123";
 
       const salt = await bcrypt.genSalt(10);

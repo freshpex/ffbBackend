@@ -1,10 +1,11 @@
 import User from "../models/User.js";
 import LoginActivity from "../models/LoginActivity.js";
-import bcrypt from "bcryptjs";
+import bcrypt from "bcrypt";
 import speakeasy from "speakeasy";
 import QRCode from "qrcode";
 import logger from "../middleware/logger.js";
 import { ApiError } from "../middleware/errorHandler.js";
+import { getAdminRecipientEmails, sendTemplateEmail } from "../services/emailService.js";
 
 // Change password
 export const changePassword = async (req, res, next) => {
@@ -34,18 +35,37 @@ export const changePassword = async (req, res, next) => {
     if (!user) {
       throw new ApiError("User not found", 404, "not_found");
     }
+    
+    const hasLocalPassword = typeof user.password === "string" &&
+      user.password.length > 0;
 
-    // Verify current password
-    const isPasswordValid = await bcrypt.compare(
-      currentPassword,
-      user.password,
-    );
+    let allowedWithoutVerification = false;
 
-    if (!isPasswordValid) {
-      throw new ApiError(
-        "Current password is incorrect",
-        400,
-        "invalid_password",
+    if (hasLocalPassword) {
+      const isPasswordValid = await bcrypt.compare(currentPassword, user.password);
+
+      if (!isPasswordValid) {
+        
+        logger.warn("Password mismatch on change attempt", {
+          userId: user._id?.toString(),
+          email: user.email,
+          hasLocalPassword,
+          uidPresent: !!user.uid,
+          currentPasswordLength: currentPassword ? currentPassword.length : 0,
+        });
+
+        if (user.uid) {
+          allowedWithoutVerification = true;
+          logger.info(
+            `User ${user.email} has an external UID (${user.uid}); allowing password set despite current password mismatch`,
+          );
+        } else {
+          throw new ApiError("Current password is incorrect", 400, "invalid_password");
+        }
+      }
+    } else {
+      logger.info(
+        `User ${user.email} has no local password; allowing password set via authenticated endpoint`,
       );
     }
 
@@ -58,9 +78,68 @@ export const changePassword = async (req, res, next) => {
 
     await user.save();
 
+    // Email notifications (non-blocking)
+    try {
+      const time = new Date().toISOString();
+      const ip = req.ip || req.headers["x-forwarded-for"] || "";
+      const userAgent = req.headers["user-agent"] || "";
+
+      // Notify user
+      sendTemplateEmail({
+        templateKey: "password_changed_user",
+        to: [{ email: user.email, name: `${user.firstName || ""} ${user.lastName || ""}`.trim() }],
+        variables: {
+          name: `${user.firstName || ""} ${user.lastName || ""}`.trim() || "Customer",
+          email: user.email,
+          userId: user._id?.toString(),
+          time,
+          ip,
+          userAgent,
+        },
+        customId: "event:password-changed:user",
+      }).catch((err) => {
+        logger.error("Failed to send password changed email to user", {
+          message: err?.message,
+          userId: user._id?.toString(),
+        });
+      });
+
+      // Notify admins
+      const adminEmails = await getAdminRecipientEmails();
+      if (adminEmails.length) {
+        sendTemplateEmail({
+          templateKey: "password_changed_admin",
+          to: adminEmails,
+          variables: {
+            name: `${user.firstName || ""} ${user.lastName || ""}`.trim() || "(no name)",
+            email: user.email,
+            userId: user._id?.toString(),
+            time,
+            ip,
+            userAgent,
+          },
+          customId: "event:password-changed:admin",
+        }).catch((err) => {
+          logger.error("Failed to send password changed admin email", {
+            message: err?.message,
+            userId: user._id?.toString(),
+          });
+        });
+      }
+    } catch (err) {
+      logger.error("Password change email setup failed", {
+        message: err?.message,
+        userId: user._id?.toString(),
+      });
+    }
+
+    // Indicate to client if we set the password without verifying the previous one
     res.status(200).json({
       success: true,
       message: "Password changed successfully",
+      ...(allowedWithoutVerification && {
+        note: "Password was set without verifying the previous password because account is linked to an external auth provider",
+      }),
     });
   } catch (error) {
     logger.error("Error changing password:", error);

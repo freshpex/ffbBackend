@@ -9,8 +9,8 @@ import {
   getReferralProgram,
   generateReferralLink,
   getCommissionHistory,
+  inviteReferral,
 } from "../controllers/ReferralController.js";
-
 const router = express.Router();
 
 // Get referral program details - public route
@@ -27,6 +27,13 @@ router.get("/commissions", asyncHandler(getCommissionHistory));
 
 // Generate referral link
 router.post("/generate-link", asyncHandler(generateReferralLink));
+
+// Invite friends by email
+router.post("/invite", asyncHandler(async (req, res, next) => {
+  const { inviteEmails, message } = req.body;
+  req.body.emails = inviteEmails || (req.body.email ? [req.body.email] : req.body.emails);
+  return inviteReferral(req, res, next);
+}));
 
 // Get user's referrals
 router.get("/", asyncHandler(getUserReferrals));

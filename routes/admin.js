@@ -45,6 +45,8 @@ import {
 import AdminProfileController from "../controllers/AdminProfileController.js";
 import AdminSettingsController from "../controllers/AdminSettingsController.js";
 import AdminNotificationController from "../controllers/AdminNotificationController.js";
+import AdminEmailController from "../controllers/AdminEmailController.js";
+import AdminImpersonationController from "../controllers/AdminImpersonationController.js";
 import { syncYoutubePlaylist } from "../controllers/EducationAdminController.js";
 import { listImportHistory, getImportHistoryById } from "../controllers/ImportHistoryController.js";
 import { check } from "express-validator";
@@ -532,23 +534,39 @@ router.delete(
 );
 
 // Admin Profile routes
-router.get("/profile", asyncHandler(AdminProfileController.getAdminProfile));
-router.put("/profile", asyncHandler(AdminProfileController.updateAdminProfile));
+router.get("/profile", requireAdmin, asyncHandler(AdminProfileController.getAdminProfile));
+router.put("/profile", requireAdmin, asyncHandler(AdminProfileController.updateAdminProfile));
 router.post(
   "/profile/image",
+  requireAdmin,
   AdminProfileController.upload.single("image"),
   asyncHandler(AdminProfileController.uploadAdminProfileImage),
 );
 router.put(
   "/profile/password",
+  requireAdmin,
   asyncHandler(AdminProfileController.changeAdminPassword),
+);
+
+// Admin impersonation (short-lived user JWT)
+router.post(
+  "/impersonate",
+  requireAdmin,
+  asyncHandler(AdminImpersonationController.impersonateUser),
+);
+router.post(
+  "/impersonate/revoke",
+  requireAdmin,
+  asyncHandler(AdminImpersonationController.revokeImpersonation),
 );
 router.get(
   "/profile/preferences",
+  requireAdmin,
   asyncHandler(AdminProfileController.getAdminPreferences),
 );
 router.put(
   "/profile/preferences",
+  requireAdmin,
   asyncHandler(AdminProfileController.updateAdminPreferences),
 );
 
@@ -561,6 +579,27 @@ router.get(
 router.get(
   "/settings/:key",
   asyncHandler(AdminSettingsController.getSettingByKey),
+);
+
+router.get(
+  "/emails/templates",
+  requireAdmin,
+  asyncHandler(AdminEmailController.adminListEmailTemplates),
+);
+router.get(
+  "/emails/templates/:templateKey",
+  requireAdmin,
+  asyncHandler(AdminEmailController.adminGetEmailTemplate),
+);
+router.put(
+  "/emails/templates/:templateKey",
+  requireAdmin,
+  asyncHandler(AdminEmailController.adminUpsertEmailTemplate),
+);
+router.post(
+  "/emails/send",
+  requireAdmin,
+  asyncHandler(AdminEmailController.adminSendEmail),
 );
 router.put("/settings", asyncHandler(AdminSettingsController.updateSettings));
 router.post("/settings", asyncHandler(AdminSettingsController.createSetting));

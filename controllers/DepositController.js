@@ -97,9 +97,9 @@ export const createDeposit = async (req, res, next) => {
     }
 
     // Enforce minimum deposit amount
-    if (parseFloat(amount) < 50) {
+    if (parseFloat(amount) < 5) {
       throw new ApiError(
-        "Minimum deposit amount is 50",
+        "Minimum deposit amount is 5",
         400,
         "validation_error",
       );
@@ -501,7 +501,8 @@ export const adminApproveDeposit = async (req, res, next) => {
         amount: deposit.amount,
         currency: deposit.currency,
         method: deposit.method,
-        status: "completed"
+        status: "completed",
+        processedAt: deposit.completedAt || new Date(),
       });
     } catch (eventError) {
       // Log the error but don't affect the response

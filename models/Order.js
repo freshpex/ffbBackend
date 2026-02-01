@@ -10,7 +10,6 @@ const OrderSchema = new mongoose.Schema(
     symbol: {
       type: String,
       required: true,
-      index: true,
     },
     side: {
       type: String,

@@ -37,7 +37,7 @@ const resetAdminPassword = async () => {
       const uniqueId = generateUniqueId();
 
       const newAdmin = {
-        email: "admin@example.com",
+        email: "admin@ffb.com",
         firstName: "Admin",
         lastName: "User",
         password: hashedPassword,

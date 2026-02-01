@@ -5,12 +5,10 @@ const visitorSchema = new mongoose.Schema(
     visitorId: {
       type: String,
       required: true,
-      index: true
     },
     sessionId: {
       type: String,
       required: true,
-      index: true
     },
     browserInfo: {
       userAgent: String,

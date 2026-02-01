@@ -222,8 +222,9 @@ function calculateCartTotals(cart) {
   const tax = subtotal * 0.08; // 8% tax
   const total = subtotal + shippingFee + tax;
 
-  // Calculate potential reward (200% cashback)
-  const potentialReward = total * 2;
+
+ const CASHBACK_RATE = 0.5; // 50%
+  const potentialReward = total * CASHBACK_RATE;
 
   return {
     ...cart.toObject(),

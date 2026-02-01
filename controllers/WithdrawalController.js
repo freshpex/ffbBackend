@@ -4,6 +4,34 @@ import mongoose from "mongoose";
 import logger from "../middleware/logger.js";
 import { ApiError } from "../middleware/errorHandler.js";
 
+const normalizeAccountNumber = (value) =>
+  String(value || "")
+    .replace(/\s+/g, "")
+    .trim();
+
+const getCompletedDepositTotal = async (userId, session) => {
+  const matchUserId =
+    typeof userId === "string" ? new mongoose.Types.ObjectId(userId) : userId;
+
+  const pipeline = [
+    {
+      $match: {
+        user: matchUserId,
+        type: "deposit",
+        status: "completed",
+        currency: { $in: ["USD", "USDT"] },
+      },
+    },
+    { $group: { _id: null, total: { $sum: "$amount" } } },
+  ];
+
+  const query = Transaction.aggregate(pipeline);
+  if (session) query.session(session);
+
+  const agg = await query;
+  return agg[0]?.total || 0;
+};
+
 // Get all withdrawals for a user
 export const getUserWithdrawals = async (req, res, next) => {
   try {
@@ -152,6 +180,27 @@ export const createWithdrawal = async (req, res, next) => {
       );
     }
 
+    // Check minimum deposit requirement (500 USDT)
+    const MIN_DEPOSIT_FOR_WITHDRAWAL = 500;
+    const depositTotal = await getCompletedDepositTotal(req.user._id);
+    if (depositTotal < MIN_DEPOSIT_FOR_WITHDRAWAL) {
+      throw new ApiError(
+        `You must have at least ${MIN_DEPOSIT_FOR_WITHDRAWAL} USDT in completed deposits before withdrawing funds. Current deposits: ${depositTotal.toFixed(2)} USDT`,
+        403,
+        "insufficient_deposits"
+      );
+    }
+
+    // Check minimum withdrawal amount
+    const MIN_WITHDRAWAL_AMOUNT = 1000;
+    if (amount < MIN_WITHDRAWAL_AMOUNT) {
+      throw new ApiError(
+        `Minimum withdrawal amount is ${MIN_WITHDRAWAL_AMOUNT} USDT`,
+        400,
+        "below_minimum"
+      );
+    }
+
     // Calculate fee (e.g., 1% of withdrawal amount)
     const feePercentage = 0.01;
     const fee = parseFloat((amount * feePercentage).toFixed(2));
@@ -223,6 +272,152 @@ export const createWithdrawal = async (req, res, next) => {
   } catch (error) {
     await session.abortTransaction();
     logger.error("Error creating withdrawal:", error);
+    next(error);
+  } finally {
+    session.endSession();
+  }
+};
+
+// Internal transfer to another user by account number
+export const createInternalTransfer = async (req, res, next) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const rawAccountNumber = req.body?.toAccountNumber || req.body?.accountNumber;
+    const toAccountNumber = normalizeAccountNumber(rawAccountNumber);
+    const amount = Number(req.body?.amount);
+    const currency = req.body?.currency || "USD";
+    const description = req.body?.description;
+
+    if (!toAccountNumber) {
+      throw new ApiError(
+        "Recipient account number is required",
+        400,
+        "validation_error",
+      );
+    }
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new ApiError("Valid transfer amount is required", 400, "validation_error");
+    }
+
+    const sender = await User.findById(req.user._id)
+      .select("balance kycVerified accountNumber email")
+      .session(session);
+
+    if (!sender) {
+      throw new ApiError("User not found", 404, "not_found");
+    }
+
+    // Keep consistent with withdrawals: require KYC verified to move funds.
+    if (!sender.kycVerified) {
+      throw new ApiError(
+        "KYC verification required to transfer funds. Please complete KYC verification in Settings.",
+        403,
+        "kyc_required",
+      );
+    }
+
+    const recipient = await User.findOne({ accountNumber: toAccountNumber })
+      .select("balance accountNumber email")
+      .session(session);
+
+    if (!recipient) {
+      throw new ApiError("Recipient not found", 404, "recipient_not_found");
+    }
+
+    if (String(recipient._id) === String(sender._id)) {
+      throw new ApiError("You cannot transfer to your own account", 400, "validation_error");
+    }
+
+    if (Number(sender.balance || 0) < amount) {
+      throw new ApiError(
+        `Insufficient balance. Required: $${amount.toFixed(2)}, Available: $${Number(sender.balance || 0).toFixed(2)}`,
+        400,
+        "insufficient_balance",
+      );
+    }
+
+    // Debit sender with optimistic condition
+    const senderUpdated = await User.findOneAndUpdate(
+      { _id: sender._id, balance: { $gte: amount } },
+      { $inc: { balance: -amount } },
+      { session, new: true },
+    );
+
+    if (!senderUpdated) {
+      throw new ApiError("Insufficient balance", 400, "insufficient_balance");
+    }
+
+    // Credit recipient
+    const recipientUpdated = await User.findByIdAndUpdate(
+      recipient._id,
+      { $inc: { balance: amount } },
+      { session, new: true },
+    );
+
+    // Record transactions (one for sender, one for recipient)
+    const now = new Date();
+    const [senderTxn, recipientTxn] = await Transaction.create(
+      [
+        {
+          user: sender._id,
+          type: "transfer",
+          amount: -amount,
+          currency,
+          status: "completed",
+          method: "internal",
+          description: description || `Transfer to ${toAccountNumber}`,
+          processedAt: now,
+          metadata: {
+            direction: "out",
+            toUser: recipient._id,
+            toAccountNumber,
+            fromAccountNumber: sender.accountNumber,
+          },
+        },
+        {
+          user: recipient._id,
+          type: "transfer",
+          amount,
+          currency,
+          status: "completed",
+          method: "internal",
+          description: `Transfer from ${sender.accountNumber || sender.email || "FFB User"}`,
+          processedAt: now,
+          metadata: {
+            direction: "in",
+            fromUser: sender._id,
+            fromAccountNumber: sender.accountNumber,
+            toAccountNumber,
+          },
+        },
+      ],
+      { session, ordered: true },
+    );
+
+    await session.commitTransaction();
+
+    logger.info(
+      `User ${req.user.email} transferred ${amount} ${currency} to account ${toAccountNumber}`,
+    );
+
+    res.status(201).json({
+      success: true,
+      message: "Transfer completed successfully",
+      data: {
+        amount,
+        currency,
+        toAccountNumber,
+        senderBalance: senderUpdated.balance || 0,
+        recipientAccountNumber: recipientUpdated?.accountNumber,
+        transaction: senderTxn,
+      },
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    logger.error("Error creating internal transfer:", error);
     next(error);
   } finally {
     session.endSession();
@@ -316,7 +511,7 @@ export const getWithdrawalMethods = async (req, res, next) => {
         name: "Bank Transfer",
         description: "Withdraw directly to your bank account",
         processingTime: "1-3 business days",
-        minAmount: 100,
+        minAmount: 1000,
         maxAmount: 50000,
         fee: "1%",
         status: "active",
@@ -357,7 +552,7 @@ export const getWithdrawalMethods = async (req, res, next) => {
         name: "Cryptocurrency",
         description: "Withdraw via Bitcoin, Ethereum, or USDT",
         processingTime: "10-60 minutes",
-        minAmount: 50,
+        minAmount: 1500,
         maxAmount: 500000,
         fee: "1%",
         status: "active",
@@ -391,7 +586,7 @@ export const getWithdrawalMethods = async (req, res, next) => {
         name: "PayPal",
         description: "Withdraw to your PayPal account",
         processingTime: "1-24 hours",
-        minAmount: 10,
+        minAmount: 1000,
         maxAmount: 10000,
         fee: "1%",
         status: "active",

@@ -117,6 +117,12 @@ const userSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    accountNumber: {
+      type: String,
+      unique: true,
+      sparse: true,
+      index: true,
+    },
     kycVerified: {
       type: Boolean,
       default: false,
@@ -260,6 +266,27 @@ const userSchema = new mongoose.Schema(
   },
 );
 
+const generateAccountNumberCandidate = () => {
+  // 10-digit numeric, first digit non-zero.
+  const first = Math.floor(Math.random() * 9) + 1;
+  const rest = Math.floor(Math.random() * 1_000_000_000)
+    .toString()
+    .padStart(9, "0");
+  return `${first}${rest}`;
+};
+
+userSchema.statics.generateUniqueAccountNumber = async function ({ session } = {}) {
+  for (let i = 0; i < 20; i++) {
+    const candidate = generateAccountNumberCandidate();
+    const query = this.exists({ accountNumber: candidate });
+    if (session) query.session(session);
+    // eslint-disable-next-line no-await-in-loop
+    const exists = await query;
+    if (!exists) return candidate;
+  }
+  throw new Error("Failed to generate unique account number");
+};
+
 // Hash password before saving
 userSchema.pre("save", async function (next) {
   const user = this;
@@ -287,6 +314,19 @@ userSchema.pre("save", function (next) {
   }
 
   next();
+});
+
+// Generate unique account number if not set
+userSchema.pre("save", async function (next) {
+  try {
+    if (this.accountNumber) return next();
+
+    this.accountNumber = await this.constructor.generateUniqueAccountNumber();
+
+    next();
+  } catch (err) {
+    next(err);
+  }
 });
 
 // Compare password method

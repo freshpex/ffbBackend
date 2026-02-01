@@ -5,6 +5,7 @@ import {
   getUserWithdrawals,
   getWithdrawalById,
   createWithdrawal,
+  createInternalTransfer,
   cancelWithdrawal,
   getWithdrawalMethods,
   getWithdrawalStats,
@@ -28,6 +29,9 @@ router.get("/methods", asyncHandler(getWithdrawalMethods));
 
 // Create new withdrawal request
 router.post("/", asyncHandler(createWithdrawal));
+
+// Internal transfer (send to another user by account number)
+router.post("/transfer", asyncHandler(createInternalTransfer));
 
 // Get specific withdrawal by ID
 router.get("/:id", asyncHandler(getWithdrawalById));

@@ -2,6 +2,7 @@ import jwt from "jsonwebtoken";
 import { ApiError } from "./errorHandler.js";
 import User from "../models/User.js";
 import logger from "./logger.js";
+import ImpersonationLog from "../models/ImpersonationLog.js";
 
 // Verify JWT token middleware
 export const verifyToken = async (req, res, next) => {
@@ -21,11 +22,57 @@ export const verifyToken = async (req, res, next) => {
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
+      // If this is an impersonation token, validate it against the audit log (revocation + binding)
+      if (decoded?.impersonationLogId && decoded?.tokenId) {
+        const logDoc = await ImpersonationLog.findById(decoded.impersonationLogId)
+          .select("admin user tokenId expiresAt revoked")
+          .lean();
+
+        const now = new Date();
+        const isValid =
+          !!logDoc &&
+          !logDoc.revoked &&
+          String(logDoc.tokenId) === String(decoded.tokenId) &&
+          String(logDoc.user) === String(decoded.userId) &&
+          (!logDoc.expiresAt || new Date(logDoc.expiresAt) > now);
+
+        if (!isValid) {
+          throw new ApiError("Invalid impersonation token", 401, "invalid_token");
+        }
+
+        req.impersonation = {
+          impersonatedBy: decoded.impersonatedBy,
+          impersonationLogId: decoded.impersonationLogId,
+          tokenId: decoded.tokenId,
+        };
+      }
+
       // Attach user to request object
       const user = await User.findById(decoded.userId).select("-password");
 
       if (!user) {
         throw new ApiError("User not found", 401, "auth_error");
+      }
+
+      // Allow profile endpoint to pass through even for suspended/inactive users
+      // This is needed so the frontend can fetch the user status and show the suspension modal
+      const isProfileEndpoint = req.path === "/profile" || req.path.endsWith("/users/profile");
+      
+      // Check if account is suspended or inactive (skip check for profile endpoint)
+      if (!isProfileEndpoint && user.status === "suspended") {
+        throw new ApiError(
+          "Your account has been suspended due to suspicious or fraudulent activities. Please contact support for more information.",
+          403,
+          "account_suspended"
+        );
+      }
+
+      if (!isProfileEndpoint && user.status === "inactive") {
+        throw new ApiError(
+          "Your account is currently inactive. Please contact support to reactivate your account.",
+          403,
+          "account_inactive"
+        );
       }
 
       req.user = user;

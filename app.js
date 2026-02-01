@@ -41,7 +41,23 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Setup middleware
-app.use(cors());
+const allowedOrigin = "*";
+const corsOptions = {
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (allowedOrigin === "*") return callback(null, true);
+    const allowed = allowedOrigin.split(",").map((s) => s.trim());
+    if (allowed.indexOf(origin) !== -1) return callback(null, true);
+    return callback(new Error("Not allowed by CORS"));
+  },
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  optionsSuccessStatus: 204,
+  maxAge: 600,
+};
+
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 app.use(helmet());
 app.use(compression());
 app.use(express.json());
@@ -81,7 +97,9 @@ app.use("/api/admin/analytics", adminAnalyticsRouter);
 app.use("/api/trading", tradingRouter);
 app.use("/api/tracking", visitorRouter);
 app.use("/api/tasks", tasksRouter);
+// KYC routes (user-facing)
 app.use("/api/users/kyc", kycRouter);
+// Shop routes
 app.use("/api/products", productsRouter);
 app.use("/api/cart", cartRouter);
 app.use("/api/shop/orders", shopOrdersRouter);

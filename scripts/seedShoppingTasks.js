@@ -15,7 +15,7 @@ async function seedShoppingTasks() {
       {
         title: "First Shop Purchase",
         description:
-          "Make your first shop purchase and get 200% cashback! Browse our store, add items to cart, and complete your order.",
+          "Make your first shop purchase and get 20% cashback! Browse our store, add items to cart, and complete your order.",
         category: "shopping",
         reward: 10,
         rewardType: "bonus",
@@ -33,7 +33,7 @@ async function seedShoppingTasks() {
       {
         title: "Shop Explorer",
         description:
-          "Complete 3 shop purchases this week. Each purchase gives 200% cashback automatically!",
+          "Complete 3 shop purchases this week. Each purchase gives 20% cashback automatically!",
         category: "shopping",
         reward: 25,
         rewardType: "cash",
@@ -53,7 +53,7 @@ async function seedShoppingTasks() {
       {
         title: "Big Spender",
         description:
-          "Make a single shop purchase of $50 or more. Get 200% cashback + extra $30 bonus!",
+          "Make a single shop purchase of $50 or more. Get 20% cashback + extra $30 bonus!",
         category: "shopping",
         reward: 30,
         rewardType: "bonus",
@@ -72,7 +72,7 @@ async function seedShoppingTasks() {
       {
         title: "Shop VIP",
         description:
-          "Complete 10 shop purchases total. Unlock VIP status + $50 bonus. Remember: Every purchase gives 200% cashback!",
+          "Complete 10 shop purchases total. Unlock VIP status + $50 bonus. Remember: Every purchase gives 20% cashback!",
         category: "shopping",
         reward: 50,
         rewardType: "cash",
@@ -90,7 +90,7 @@ async function seedShoppingTasks() {
       {
         title: "Fashion Shopper",
         description:
-          "Purchase any clothing item from our shop. Get 200% cashback + $15 fashion bonus!",
+          "Purchase any clothing item from our shop. Get 20% cashback + $15 fashion bonus!",
         category: "shopping",
         reward: 15,
         rewardType: "bonus",
@@ -109,7 +109,7 @@ async function seedShoppingTasks() {
       {
         title: "Tech Enthusiast",
         description:
-          "Buy any electronics from our store. Enjoy 200% cashback + $20 tech bonus!",
+          "Buy any electronics from our store. Enjoy 20% cashback + $20 tech bonus!",
         category: "shopping",
         reward: 20,
         rewardType: "bonus",
@@ -128,7 +128,7 @@ async function seedShoppingTasks() {
       {
         title: "Daily Shopper",
         description:
-          "Make a shop purchase every day for 5 days in a row. Each purchase gives 200% cashback + $40 streak bonus!",
+          "Make a shop purchase every day for 5 days in a row. Each purchase gives 20% cashback + $40 streak bonus!",
         category: "shopping",
         reward: 40,
         rewardType: "cash",
@@ -147,7 +147,7 @@ async function seedShoppingTasks() {
       {
         title: "Cart Filler",
         description:
-          "Add 5 or more items to your cart and complete the purchase. Get 200% cashback + $25 bonus!",
+          "Add 5 or more items to your cart and complete the purchase. Get 20% cashback + $25 bonus!",
         category: "shopping",
         reward: 25,
         rewardType: "bonus",

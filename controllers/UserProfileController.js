@@ -47,6 +47,7 @@ const serializeUserProfile = (user) => {
     phone: user.phone || user.phoneNumber || "",
     address: addressValue,
     country: user.country || "",
+    accountNumber: user.accountNumber || "",
     balance: user.balance || 0,
     bonusBalance: user.bonusBalance || 0,
     accountBalance: user.balance || 0,
@@ -54,12 +55,15 @@ const serializeUserProfile = (user) => {
     kycVerified: user.kycVerified,
     kycVerifiedAt: user.kycVerifiedAt,
     kycNotes: user.kycNotes,
+    status: user.status || "active",
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };
 };
 
-const BONUS_CONVERSION_MIN_DEPOSIT = 300;
+const BONUS_CONVERSION_MIN_DEPOSIT = 200;
+const BONUS_CONVERSION_MIN_AMOUNT_FIRST = 300;
+const BONUS_CONVERSION_MIN_AMOUNT_SUBSEQUENT = 1000;
 
 const getUserIdFromReq = (req) => req.user?._id || req.user?.id;
 
@@ -87,19 +91,49 @@ const getCompletedDepositTotal = async (userId, session) => {
   return agg[0]?.total || 0;
 };
 
+const getHasConvertedBonusBefore = async (userId, session) => {
+  const matchUserId =
+    typeof userId === "string" ? new mongoose.Types.ObjectId(userId) : userId;
+
+  const query = Transaction.exists({
+    user: matchUserId,
+    type: "bonus",
+    "metadata.kind": "bonus_conversion",
+  });
+
+  if (session) query.session(session);
+
+  const exists = await query;
+  return !!exists;
+};
+
+const getMinBonusConversionAmount = (hasConvertedBefore) =>
+  hasConvertedBefore
+    ? BONUS_CONVERSION_MIN_AMOUNT_SUBSEQUENT
+    : BONUS_CONVERSION_MIN_AMOUNT_FIRST;
+
 export const getBonusConversionStatus = async (req, res, next) => {
   try {
     const userId = getUserIdFromReq(req);
     if (!userId) throw new ApiError("Unauthorized", 401, "unauthorized");
 
-    const [user, depositTotal] = await Promise.all([
+    const [user, depositTotal, hasConvertedBefore] = await Promise.all([
       User.findById(userId).select("balance bonusBalance").lean(),
       getCompletedDepositTotal(userId),
+      getHasConvertedBonusBefore(userId),
     ]);
 
     if (!user) throw new ApiError("User not found", 404, "not_found");
 
-    const eligible = depositTotal >= BONUS_CONVERSION_MIN_DEPOSIT;
+    const depositEligible = depositTotal >= BONUS_CONVERSION_MIN_DEPOSIT;
+    const minBonusConversionAmount = getMinBonusConversionAmount(
+      hasConvertedBefore,
+    );
+    const bonusMeetsMinimum =
+      Number(user.bonusBalance || 0) >= Number(minBonusConversionAmount);
+
+    // Keep "eligible" backwards-compatible with the deposit eligibility gate.
+    const eligible = depositEligible;
 
     res.status(200).json({
       success: true,
@@ -108,6 +142,10 @@ export const getBonusConversionStatus = async (req, res, next) => {
         bonusBalance: user.bonusBalance || 0,
         depositTotal,
         minDepositRequired: BONUS_CONVERSION_MIN_DEPOSIT,
+        hasConvertedBefore,
+        minBonusConversionAmount,
+        bonusMeetsMinimum,
+        depositEligible,
         eligible,
       },
     });
@@ -139,6 +177,11 @@ export const convertBonusBalance = async (req, res, next) => {
       );
     }
 
+    const hasConvertedBefore = await getHasConvertedBonusBefore(userId, session);
+    const minBonusConversionAmount = getMinBonusConversionAmount(
+      hasConvertedBefore,
+    );
+
     const requestedAmount = req.body?.amount;
     const amount =
       requestedAmount === undefined || requestedAmount === null || requestedAmount === ""
@@ -149,13 +192,30 @@ export const convertBonusBalance = async (req, res, next) => {
       throw new ApiError("Valid conversion amount is required", 400, "validation_error");
     }
 
+    if (amount < minBonusConversionAmount) {
+      const err = new ApiError(
+        `Minimum bonus conversion amount is ${minBonusConversionAmount} USDT${hasConvertedBefore ? " for subsequent conversions" : " for your first conversion"}`,
+        400,
+        "bonus_conversion_minimum_not_met",
+      );
+      err.details = {
+        minBonusConversionAmount,
+        hasConvertedBefore,
+        requestedAmount: amount,
+        bonusBalance: Number(user.bonusBalance || 0),
+      };
+      throw err;
+    }
+
     if ((user.bonusBalance || 0) < amount) {
       throw new ApiError("Insufficient bonus balance", 400, "insufficient_bonus_balance");
     }
 
+    const convertedAmount = parseFloat((amount * 0.5).toFixed(2));
+
     const updated = await User.findOneAndUpdate(
       { _id: userId, bonusBalance: { $gte: amount } },
-      { $inc: { bonusBalance: -amount, balance: amount } },
+      { $inc: { bonusBalance: -amount, balance: convertedAmount } },
       { session, new: true },
     );
 
@@ -168,16 +228,21 @@ export const convertBonusBalance = async (req, res, next) => {
         {
           user: userId,
           type: "bonus",
-          amount,
+          amount: convertedAmount,
           currency: "USD",
           status: "completed",
           method: "internal",
-          description: "Converted bonus balance to main balance",
+          description: "Converted bonus balance to main balance (50% conversion rate)",
           processedAt: new Date(),
           metadata: {
             kind: "bonus_conversion",
             depositTotal,
             minDepositRequired: BONUS_CONVERSION_MIN_DEPOSIT,
+            minBonusConversionAmount,
+            hasConvertedBefore,
+            originalBonusAmount: amount,
+            convertedAmount,
+            conversionRate: 0.5,
           },
         },
       ],
@@ -188,13 +253,17 @@ export const convertBonusBalance = async (req, res, next) => {
 
     res.status(200).json({
       success: true,
-      message: "Bonus balance converted successfully",
+      message: "Bonus balance converted successfully (50% conversion rate applied)",
       data: {
-        convertedAmount: amount,
+        originalBonusAmount: amount,
+        convertedAmount,
+        conversionRate: 0.5,
         balance: updated.balance || 0,
         bonusBalance: updated.bonusBalance || 0,
         depositTotal,
         minDepositRequired: BONUS_CONVERSION_MIN_DEPOSIT,
+        minBonusConversionAmount,
+        hasConvertedBefore,
         eligible: true,
       },
     });
@@ -211,9 +280,17 @@ export const getUserProfile = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    const user = await User.findById(userId)
-      .select("-password -__v -refreshToken")
-      .lean();
+    const user = await User.findById(userId).select("-password -__v -refreshToken");
+    if (user && !user.accountNumber) {
+      try {
+        user.accountNumber = await user.constructor.generateUniqueAccountNumber();
+        await user.save();
+      } catch (e) {
+        logger.warn(`Failed to backfill account number for user ${userId}: ${e.message}`);
+      }
+    }
+
+    const userObj = user ? user.toObject() : null;
 
     if (!user) {
       return res.status(404).json({
@@ -224,7 +301,7 @@ export const getUserProfile = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      data: serializeUserProfile(user),
+      data: serializeUserProfile(userObj),
     });
   } catch (error) {
     console.error("Error fetching user profile:", error);
