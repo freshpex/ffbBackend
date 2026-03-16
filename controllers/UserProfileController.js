@@ -56,6 +56,7 @@ const serializeUserProfile = (user) => {
     kycVerifiedAt: user.kycVerifiedAt,
     kycNotes: user.kycNotes,
     status: user.status || "active",
+    hasWithdrawalPin: !!user.withdrawalPinHash,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };
@@ -280,7 +281,7 @@ export const getUserProfile = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    const user = await User.findById(userId).select("-password -__v -refreshToken");
+    const user = await User.findById(userId).select("-password -__v -refreshToken +withdrawalPinHash");
     if (user && !user.accountNumber) {
       try {
         user.accountNumber = await user.constructor.generateUniqueAccountNumber();

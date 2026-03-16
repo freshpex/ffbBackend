@@ -4,6 +4,7 @@ import { asyncHandler } from "../middleware/errorHandler.js";
 import {
   getUserWithdrawals,
   getWithdrawalById,
+  requestWithdrawalOtp,
   createWithdrawal,
   createInternalTransfer,
   cancelWithdrawal,
@@ -26,6 +27,9 @@ router.get("/stats", asyncHandler(getWithdrawalStats));
 
 // Get available withdrawal methods
 router.get("/methods", asyncHandler(getWithdrawalMethods));
+
+// Send OTP for withdrawal verification
+router.post("/request-otp", asyncHandler(requestWithdrawalOtp));
 
 // Create new withdrawal request
 router.post("/", asyncHandler(createWithdrawal));

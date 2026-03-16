@@ -388,6 +388,107 @@ export const getSecurityStatus = async (req, res, next) => {
   }
 };
 
+// Set or update withdrawal PIN
+export const setWithdrawalPin = async (req, res, next) => {
+  try {
+    const { pin, confirmPin, currentPin } = req.body || {};
+
+    if (!pin || !confirmPin) {
+      throw new ApiError(
+        "PIN and confirm PIN are required",
+        400,
+        "validation_error",
+      );
+    }
+
+    if (pin !== confirmPin) {
+      throw new ApiError("PIN values do not match", 400, "validation_error");
+    }
+
+    if (!/^\d{4,6}$/.test(String(pin))) {
+      throw new ApiError(
+        "Withdrawal PIN must be 4 to 6 digits",
+        400,
+        "validation_error",
+      );
+    }
+
+    const user = await User.findById(req.user._id).select("+withdrawalPinHash email firstName lastName");
+
+    if (!user) {
+      throw new ApiError("User not found", 404, "not_found");
+    }
+
+    const hadExistingPin = !!user.withdrawalPinHash;
+
+    if (hadExistingPin) {
+      if (!currentPin) {
+        throw new ApiError(
+          "Current PIN is required to update withdrawal PIN",
+          400,
+          "current_pin_required",
+        );
+      }
+
+      const isCurrentPinValid = await bcrypt.compare(
+        String(currentPin),
+        user.withdrawalPinHash,
+      );
+
+      if (!isCurrentPinValid) {
+        throw new ApiError("Current PIN is incorrect", 400, "invalid_pin");
+      }
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    user.withdrawalPinHash = await bcrypt.hash(String(pin), salt);
+
+    // Clear any pending OTP when PIN changes
+    user.withdrawalOtp = {
+      codeHash: null,
+      expiresAt: null,
+      attempts: 0,
+      lastSentAt: null,
+    };
+
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: hadExistingPin
+        ? "Withdrawal PIN updated successfully"
+        : "Withdrawal PIN set successfully",
+      data: {
+        hasWithdrawalPin: true,
+      },
+    });
+  } catch (error) {
+    logger.error("Error setting withdrawal PIN:", error);
+    next(error);
+  }
+};
+
+// Get withdrawal PIN status
+export const getWithdrawalPinStatus = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user._id).select("+withdrawalPinHash");
+
+    if (!user) {
+      throw new ApiError("User not found", 404, "not_found");
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        hasWithdrawalPin: !!user.withdrawalPinHash,
+      },
+    });
+  } catch (error) {
+    logger.error("Error fetching withdrawal PIN status:", error);
+    next(error);
+  }
+};
+
 export default {
   changePassword,
   setup2FA,
@@ -395,4 +496,6 @@ export default {
   disable2FA,
   getLoginActivity,
   getSecurityStatus,
+  setWithdrawalPin,
+  getWithdrawalPinStatus,
 };

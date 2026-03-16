@@ -66,6 +66,14 @@ router.get(
   "/security/status",
   asyncHandler(UserSecurityController.getSecurityStatus),
 );
+router.get(
+  "/security/withdrawal-pin/status",
+  asyncHandler(UserSecurityController.getWithdrawalPinStatus),
+);
+router.post(
+  "/security/withdrawal-pin",
+  asyncHandler(UserSecurityController.setWithdrawalPin),
+);
 
 // User payment methods routes
 router.get(

@@ -260,6 +260,30 @@ const userSchema = new mongoose.Schema(
       enum: ["local", "google", "facebook"],
       default: "local",
     },
+    withdrawalPinHash: {
+      type: String,
+      default: null,
+      select: false,
+    },
+    withdrawalOtp: {
+      codeHash: {
+        type: String,
+        default: null,
+        select: false,
+      },
+      expiresAt: {
+        type: Date,
+        default: null,
+      },
+      attempts: {
+        type: Number,
+        default: 0,
+      },
+      lastSentAt: {
+        type: Date,
+        default: null,
+      },
+    },
   },
   {
     timestamps: true,
