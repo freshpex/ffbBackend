@@ -71,6 +71,10 @@ router.get(
   asyncHandler(UserSecurityController.getWithdrawalPinStatus),
 );
 router.post(
+  "/security/withdrawal-pin/verify",
+  asyncHandler(UserSecurityController.verifyWithdrawalPin),
+);
+router.post(
   "/security/withdrawal-pin",
   asyncHandler(UserSecurityController.setWithdrawalPin),
 );

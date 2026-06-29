@@ -489,6 +489,39 @@ export const getWithdrawalPinStatus = async (req, res, next) => {
   }
 };
 
+export const verifyWithdrawalPin = async (req, res, next) => {
+  try {
+    const { pin } = req.body || {};
+
+    if (!pin) {
+      throw new ApiError("PIN is required", 400, "validation_error");
+    }
+
+    const user = await User.findById(req.user._id).select("+withdrawalPinHash");
+
+    if (!user) {
+      throw new ApiError("User not found", 404, "not_found");
+    }
+
+    if (!user.withdrawalPinHash) {
+      throw new ApiError("Please set a card PIN before viewing card details", 400, "pin_not_set");
+    }
+
+    const isValid = await bcrypt.compare(String(pin), user.withdrawalPinHash);
+    if (!isValid) {
+      throw new ApiError("PIN is incorrect", 401, "invalid_pin");
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "PIN verified",
+    });
+  } catch (error) {
+    logger.error("Error verifying withdrawal PIN:", error);
+    next(error);
+  }
+};
+
 export default {
   changePassword,
   setup2FA,
@@ -498,4 +531,5 @@ export default {
   getSecurityStatus,
   setWithdrawalPin,
   getWithdrawalPinStatus,
+  verifyWithdrawalPin,
 };

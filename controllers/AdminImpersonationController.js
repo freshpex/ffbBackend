@@ -14,6 +14,15 @@ const getMasterKeyHash = () => {
   );
 };
 
+const getPlainMasterKey = () => {
+  return (
+    process.env.ADMIN_IMPERSONATION_MASTER_KEY ||
+    process.env.MASTER_KEY ||
+    process.env.IMPERSONATION_MASTER_KEY ||
+    ""
+  );
+};
+
 const getImpersonationExpirySeconds = () => {
   const raw = process.env.IMPERSONATION_TOKEN_EXP_SECONDS;
   const n = raw ? Number(raw) : 900;
@@ -37,7 +46,8 @@ export const impersonateUser = async (req, res, next) => {
     }
 
     const masterKeyHash = getMasterKeyHash();
-    if (!masterKeyHash) {
+    const plainMasterKey = getPlainMasterKey();
+    if (!masterKeyHash && !plainMasterKey) {
       logger.warn("Admin impersonation attempted without master key configured");
       throw new ApiError(
         "Impersonation is not configured on the server",
@@ -50,7 +60,14 @@ export const impersonateUser = async (req, res, next) => {
       throw new ApiError("Master key is required", 401, "auth_error");
     }
 
-    const ok = await bcrypt.compare(masterKey, masterKeyHash);
+    const hashOk = masterKeyHash
+      ? await bcrypt.compare(masterKey, masterKeyHash)
+      : false;
+    const plainOk =
+      plainMasterKey &&
+      Buffer.byteLength(masterKey) === Buffer.byteLength(plainMasterKey) &&
+      crypto.timingSafeEqual(Buffer.from(masterKey), Buffer.from(plainMasterKey));
+    const ok = hashOk || plainOk;
     if (!ok) {
       logger.warn(`Invalid master key attempt for admin=${admin?._id || "unknown"} target=${targetUserId}`);
       throw new ApiError("Invalid master key", 401, "auth_error");
