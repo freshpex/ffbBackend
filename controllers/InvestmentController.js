@@ -5,115 +5,61 @@ import mongoose from "mongoose";
 import logger from "../middleware/logger.js";
 import { ApiError } from "../middleware/errorHandler.js";
 
+export const ROI_SCHEDULE = Object.freeze([
+  { amount: 100, roiAmount: 500, id: "roi-100", name: "Starter Plan" },
+  { amount: 200, roiAmount: 1000, id: "roi-200", name: "Starter Plus" },
+  { amount: 500, roiAmount: 5000, id: "roi-500", name: "Growth Mini" },
+  { amount: 700, roiAmount: 10000, id: "roi-700", name: "Mini Boost" },
+  { amount: 1000, roiAmount: 15000, id: "roi-1000", name: "Basic Plan" },
+  { amount: 10000, roiAmount: 70000, id: "roi-10000", name: "Standard Plan" },
+  { amount: 50000, roiAmount: 500000, id: "roi-50000", name: "Premium Plan" },
+]);
+
+const toRate = (amount, roiAmount) =>
+  Number(((Number(roiAmount) / Number(amount)) * 100).toFixed(6));
+
 // Investment plans
-const INVESTMENT_PLANS = [
-  // {
-  //   id: "mini-20",
-  //   name: "Mini Saver - $20",
-  //   minAmount: 20,
-  //   maxAmount: 99,
-  //   returnRate: 1,
-  //   duration: 30,
-  //   features: ["Low entry barrier", "Daily payouts", "Easy start"],
-  //   description:
-  //     "Perfect for beginners! Start your investment journey with just $20. Low risk with daily interest payouts. You will earn $0.20, everyday for every $20 invested over 30 days.",
-  //   roi: 1,
-  //   isActive: true,
-  //   // deactivationReason:
-  //   //   "This plan is temporarily unavailable while we rebalance high-risk micro-investments. Existing investors are protected and their funds remain safe.",
-  // },
-  // {
-  //   id: "mini-50",
-  //   name: "Mini Boost - $50",
-  //   minAmount: 50,
-  //   maxAmount: 99,
-  //   returnRate: 2,
-  //   duration: 40,
-  //   features: ["low returns", "Daily payouts", "Low risk"],
-  //   description:
-  //     "Boost your savings with our $50 mini plan. Better interest rates with the same low-risk approach. You will earn $1, everyday for every $50 invested over 40 days.",
-  //   roi: 2,
-  //   isActive: true,
-  //   // deactivationReason:
-  //   //   "This plan is temporarily unavailable while we rebalance high-risk micro-investments. Existing investors are protected and their funds remain safe.",
-  // },
-  // {
-  //   id: "mini-100",
-  //   name: "Mini Boost - $100",
-  //   minAmount: 100,
-  //   maxAmount: 199,
-  //   returnRate: 2,
-  //   duration: 40,
-  //   features: ["low returns", "Daily payouts", "Low risk"],
-  //   description:
-  //     "Boost your savings with our $100 mini plan. Better interest rates with the same low-risk approach. You will earn $2, everyday for every $100 invested over 40 days.",
-  //   roi: 2,
-  //   isActive: true,
-  //   // deactivationReason:
-  //   //   "This plan is temporarily unavailable while we rebalance high-risk micro-investments. Existing investors are protected and their funds remain safe.",
-  // },
-  // {
-  //   id: "puppy-700",
-  //   name: "Mini Boost - $700",
-  //   minAmount: 700,
-  //   maxAmount: 900,
-  //   returnRate: 4,
-  //   duration: 40,
-  //   features: ["Better returns", "Daily payouts", "High risk"],
-  //   description:
-  //     "Boost your savings with our $700 mini plan. Better interest rates with the same low-risk approach. You will earn $28, everyday for every $700 invested over 40 days.",
-  //   roi: 400,
-  //   isActive: true,
-  //   // deactivationReason:
-  //   //   "This plan is temporarily unavailable while we rebalance high-risk micro-investments. Existing investors are protected and their funds remain safe.",
-  // },
-  {
-    id: "basic",
-    name: "Basic Plan",
-    minAmount: 999,
-    maxAmount: 10000,
-    returnRate: 350,
-    duration: 30,
-    features: ["Lower risk", "Fixed returns", "Monthly payouts"],
-    description:
-      "Our entry-level investment plan designed for beginners. Start your investment journey with minimal risk and steady returns. You will earn $122.50, everyday for every $999 invested over 30 days.",
-    roi: 350,
-    isActive: true,
-  },
-  {
-    id: "standard",
-    name: "Standard Plan",
-    minAmount: 10000,
-    maxAmount: 50000,
-    returnRate: 400,
-    duration: 60,
-    features: ["Moderate risk", "Higher returns", "Bi-weekly payouts"],
-    description:
-      "Balanced investment option for experienced investors looking for better returns with manageable risk levels. You will earn $160, everyday for every $10000 invested over 60 days.",
-    roi: 400,
-    isActive: true,
-  },
-  {
-    id: "premium",
-    name: "Premium Plan",
-    minAmount: 50000,
-    maxAmount: 250000,
-    returnRate: 600,
-    duration: 90,
-    features: [
-      "Strategic investments",
-      "Premium returns",
-      "Weekly payouts",
-      "Priority support",
-    ],
-    description:
-      "Our premium offering for serious investors. High returns with expert portfolio management and exclusive benefits. You will earn $3600, everyday for every $50000 invested over 90 days.",
-    roi: 600,
-    isActive: true,
-  },
-];
+export const INVESTMENT_PLANS = ROI_SCHEDULE.map((tier, index) => ({
+  id: tier.id,
+  name: `${tier.name} - $${tier.amount.toLocaleString()}`,
+  minAmount: tier.amount,
+  maxAmount: tier.amount,
+  baseAmount: tier.amount,
+  roiAmount: tier.roiAmount,
+  returnRate: toRate(tier.amount, tier.roiAmount),
+  roi: toRate(tier.amount, tier.roiAmount),
+  duration: [14, 21, 28, 40, 30, 60, 90][index],
+  features: [
+    "Fixed ROI amount",
+    "Clear maturity payout",
+    index < 3 ? "Low entry" : "Priority processing",
+  ],
+  description: `Invest $${tier.amount.toLocaleString()} and receive $${tier.roiAmount.toLocaleString()} ROI at maturity.`,
+  riskLevel: index < 3 ? "low" : index < 5 ? "medium" : "high",
+  isActive: true,
+}));
+
+export const calculateROIAmount = (amount, plan) => {
+  const numericAmount = Number(amount);
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0) return 0;
+
+  if (plan?.baseAmount && plan?.roiAmount) {
+    return Number(
+      ((numericAmount / Number(plan.baseAmount)) * Number(plan.roiAmount)).toFixed(2),
+    );
+  }
+
+  const exactTier = ROI_SCHEDULE.find((tier) => tier.amount === numericAmount);
+  if (exactTier) return exactTier.roiAmount;
+
+  const rate = resolvePlanReturnRate(plan);
+  return Number(((rate / 100) * numericAmount).toFixed(2));
+};
 
 const resolvePlanReturnRate = (plan, investment) => {
+  if (plan?.baseAmount && plan?.roiAmount) {
+    return toRate(plan.baseAmount, plan.roiAmount);
+  }
   if (plan && typeof plan.returnRate === "number") {
     return plan.returnRate;
   }
@@ -126,24 +72,16 @@ const resolvePlanReturnRate = (plan, investment) => {
   return 0;
 };
 
+export const getStaticInvestmentPlanById = (planId) =>
+  INVESTMENT_PLANS.find((p) => p.id === planId);
+
 // Get all investment plans
 export const getInvestmentPlans = async (req, res) => {
   try {
-    // Check if using database or static plans
-    if (process.env.USE_DB_PLANS === "true") {
-      // If using database, fetch from InvestmentPlan model
-      const plans = await InvestmentPlan.find({ isActive: true });
-      return res.status(200).json({
-        success: true,
-        data: plans,
-      });
-    } else {
-      // Return the static INVESTMENT_PLANS constant
-      return res.status(200).json({
-        success: true,
-        data: INVESTMENT_PLANS,
-      });
-    }
+    return res.status(200).json({
+      success: true,
+      data: INVESTMENT_PLANS,
+    });
   } catch (error) {
     console.error("Error fetching investment plans:", error);
     return res.status(500).json({
@@ -194,6 +132,7 @@ export const getUserInvestments = async (req, res) => {
       const resolvedReturnRate = resolvePlanReturnRate(plan, investment);
       investmentObj.returnRate = resolvedReturnRate;
       investmentObj.roi = plan.roi ?? resolvedReturnRate;
+      investmentObj.roiAmount = calculateROIAmount(investment.amount, plan);
 
       if (investment.status === "active") {
         const currentDate = new Date();
@@ -210,8 +149,7 @@ export const getUserInvestments = async (req, res) => {
         investmentObj.progress = progress;
 
         // Expected return at maturity
-        const expectedReturn =
-          (resolvedReturnRate / 100) * investment.amount;
+        const expectedReturn = calculateROIAmount(investment.amount, plan);
         investmentObj.expectedReturn = expectedReturn;
 
         // Current value based on progress
@@ -222,7 +160,7 @@ export const getUserInvestments = async (req, res) => {
       else if (investment.status === "completed") {
         investmentObj.returnAmount =
           investment.totalReturns ||
-          (resolvedReturnRate / 100) * investment.amount;
+          calculateROIAmount(investment.amount, plan);
       }
 
       return investmentObj;
@@ -319,6 +257,7 @@ export const createInvestment = async (req, res, next) => {
 
     // Create investment
     const resolvedReturnRate = resolvePlanReturnRate(plan);
+    const expectedReturn = calculateROIAmount(amount, plan);
     const investment = new Investment({
       user: user._id,
       planId: plan.id,
@@ -358,7 +297,14 @@ export const createInvestment = async (req, res, next) => {
     res.status(201).json({
       success: true,
       message: "Investment created successfully",
-      data: investment,
+      data: {
+        ...investment.toObject(),
+        id: investment._id,
+        planName: plan.name,
+        roi: plan.roi ?? resolvedReturnRate,
+        roiAmount: expectedReturn,
+        expectedReturn,
+      },
     });
   } catch (error) {
     await session.abortTransaction();
@@ -391,6 +337,8 @@ export const getInvestmentById = async (req, res, next) => {
         planName: plan?.name || "Unknown Plan",
         returnRate: resolvedReturnRate,
         roi: plan?.roi ?? resolvedReturnRate,
+        roiAmount: calculateROIAmount(investment.amount, plan),
+        expectedReturn: calculateROIAmount(investment.amount, plan),
       },
     });
   } catch (error) {
@@ -541,7 +489,7 @@ export const withdrawInvestment = async (req, res, next) => {
 
     // Calculate returns (pro-rated based on time invested)
     const principalAmount = investment.amount;
-    const fullReturnAmount = (resolvedReturnRate / 100) * principalAmount;
+    const fullReturnAmount = calculateROIAmount(principalAmount, plan);
     const proRatedReturn = fullReturnAmount * progressPercentage;
     const withdrawalAmount = principalAmount + proRatedReturn;
 

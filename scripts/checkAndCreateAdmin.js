@@ -60,8 +60,8 @@ const checkAndCreateAdmin = async () => {
       // Create a new admin with known credentials for testing
       console.log("Creating a test admin account with known credentials...");
 
-      const testAdminEmail = "testadmin@example.com";
-      const testAdminPassword = "admin123";
+      const testAdminEmail = "admin@ffbroker.com";
+      const testAdminPassword = "Admin1234!";
 
       // Check if test admin already exists
       const testAdmin = await User.findOne({ email: testAdminEmail });
@@ -162,8 +162,8 @@ const checkAndCreateAdmin = async () => {
       console.log("No admin users found. Creating a new admin user...");
 
       // Create admin user with known credentials
-      const adminEmail = "admin@ffb.com";
-      const adminPassword = "admin123";
+      const adminEmail = "admin@ffbroker.com";
+      const adminPassword = "Admin1234!";
 
       const salt = await bcrypt.genSalt(10);
       const hashedPassword = await bcrypt.hash(adminPassword, salt);

@@ -69,6 +69,8 @@ const initServer = async () => {
 
     // Initialize WebSocket server
     const websocketService = setupWebsocket(server);
+    global.websocketService = websocketService;
+    global.io = websocketService.io;
 
     // Start the price alert checking service (check every 5 minutes)
     priceAlertService.start(5 * 60 * 1000);

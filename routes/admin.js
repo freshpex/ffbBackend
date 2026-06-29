@@ -47,6 +47,7 @@ import AdminSettingsController from "../controllers/AdminSettingsController.js";
 import AdminNotificationController from "../controllers/AdminNotificationController.js";
 import AdminEmailController from "../controllers/AdminEmailController.js";
 import AdminImpersonationController from "../controllers/AdminImpersonationController.js";
+import AdminUserActionsController from "../controllers/AdminUserActionsController.js";
 import { syncYoutubePlaylist } from "../controllers/EducationAdminController.js";
 import { listImportHistory, getImportHistoryById } from "../controllers/ImportHistoryController.js";
 import { check } from "express-validator";
@@ -168,6 +169,53 @@ router.put("/users/:id", requireAdmin, asyncHandler(updateUser));
 
 // Delete user
 router.delete("/users/:id", requireSuperAdmin, asyncHandler(deleteUser));
+
+// User operations available from the admin user-management action modal
+router.post(
+  "/users/:id/balance",
+  requireAdmin,
+  asyncHandler(AdminUserActionsController.adjustUserBalance),
+);
+router.post(
+  "/users/:id/ledgers",
+  requireAdmin,
+  asyncHandler(AdminUserActionsController.createUserLedgerEntries),
+);
+router.post(
+  "/users/:id/trades",
+  requireAdmin,
+  asyncHandler(AdminUserActionsController.createUserTrade),
+);
+router.get(
+  "/users/:id/trades",
+  requireAdmin,
+  asyncHandler(AdminUserActionsController.listUserTrades),
+);
+router.put(
+  "/users/:id/trades/:tradeId",
+  requireAdmin,
+  asyncHandler(AdminUserActionsController.updateUserTrade),
+);
+router.post(
+  "/users/:id/investments",
+  requireAdmin,
+  asyncHandler(AdminUserActionsController.createUserInvestment),
+);
+router.get(
+  "/users/:id/investments",
+  requireAdmin,
+  asyncHandler(AdminUserActionsController.listUserInvestments),
+);
+router.put(
+  "/users/:id/investments/:investmentId",
+  requireAdmin,
+  asyncHandler(AdminUserActionsController.updateUserInvestment),
+);
+router.post(
+  "/users/:id/notifications",
+  requireAdmin,
+  asyncHandler(AdminUserActionsController.sendUserNotifications),
+);
 
 // Sync YouTube playlist into EducationContent (admin only)
 router.post(
