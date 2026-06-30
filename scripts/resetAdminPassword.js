@@ -33,11 +33,11 @@ const resetAdminPassword = async () => {
     if (adminUsers.length === 0) {
       // Create a new admin user
       const salt = await bcrypt.genSalt(10);
-      const hashedPassword = await bcrypt.hash("admin123", salt);
+      const hashedPassword = await bcrypt.hash("Admin1234!", salt);
       const uniqueId = generateUniqueId();
 
       const newAdmin = {
-        email: "admin@example.com",
+        email: "admin@ffbroker.com",
         firstName: "Admin",
         lastName: "User",
         password: hashedPassword,
@@ -59,7 +59,7 @@ const resetAdminPassword = async () => {
       for (const admin of adminUsers) {
         // Generate new salt and hash password
         const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash("admin123", salt);
+        const hashedPassword = await bcrypt.hash("Admin1234!", salt);
 
         // Prepare update
         const updates = {
@@ -103,7 +103,7 @@ const resetAdminPassword = async () => {
         console.log("\nAll admin users now have valid UIDs");
       }
 
-      console.log("\nAll admins have been updated with password: admin123");
+      console.log("\nAll admins have been updated with password: Admin1234!");
     }
   } catch (error) {
     console.error("Error:", error);

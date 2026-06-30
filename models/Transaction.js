@@ -46,6 +46,7 @@ const transactionSchema = new mongoose.Schema(
         "system",
         "fee",
         "paypal",
+        "referral",
       ],
     },
     walletAddress: String,

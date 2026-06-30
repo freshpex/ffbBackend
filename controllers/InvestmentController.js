@@ -5,93 +5,83 @@ import mongoose from "mongoose";
 import logger from "../middleware/logger.js";
 import { ApiError } from "../middleware/errorHandler.js";
 
+export const ROI_SCHEDULE = Object.freeze([
+  { amount: 100, roiAmount: 500, id: "roi-100", name: "Starter Plan" },
+  { amount: 200, roiAmount: 1000, id: "roi-200", name: "Starter Plus" },
+  { amount: 500, roiAmount: 5000, id: "roi-500", name: "Growth Mini" },
+  { amount: 700, roiAmount: 10000, id: "roi-700", name: "Mini Boost" },
+  { amount: 1000, roiAmount: 15000, id: "roi-1000", name: "Basic Plan" },
+  { amount: 10000, roiAmount: 70000, id: "roi-10000", name: "Standard Plan" },
+  { amount: 50000, roiAmount: 500000, id: "roi-50000", name: "Premium Plan" },
+]);
+
+const toRate = (amount, roiAmount) =>
+  Number(((Number(roiAmount) / Number(amount)) * 100).toFixed(6));
+
 // Investment plans
-const INVESTMENT_PLANS = [
-  {
-    id: "mini-200",
-    name: "Mini Saver - $200",
-    minAmount: 200,
-    maxAmount: 499,
-    returnRate: 1,
-    duration: 30,
-    features: ["Low entry barrier", "Daily payouts", "Easy start"],
-    description:
-      "Perfect for beginners! Start your investment journey with just $200. Low risk with daily interest payouts.",
-    roi: 100,
-  },
-  {
-    id: "mini-500",
-    name: "Mini Boost - $500",
-    minAmount: 500,
-    maxAmount: 999,
-    returnRate: 2.5,
-    duration: 45,
-    features: ["Better returns", "Daily payouts", "Low risk"],
-    description:
-      "Boost your savings with our $500 mini plan. Better interest rates with the same low-risk approach.",
-    roi: 250,
-  },
-  {
-    id: "basic",
-    name: "Basic Plan",
-    minAmount: 1000,
-    maxAmount: 10000,
-    returnRate: 3.5,
-    duration: 30,
-    features: ["Lower risk", "Fixed returns", "Monthly payouts"],
-    description:
-      "Our entry-level investment plan designed for beginners. Start your investment journey with minimal risk and steady returns.",
-    roi: 350,
-  },
-  {
-    id: "standard",
-    name: "Standard Plan",
-    minAmount: 10000,
-    maxAmount: 50000,
-    returnRate: 4,
-    duration: 60,
-    features: ["Moderate risk", "Higher returns", "Bi-weekly payouts"],
-    description:
-      "Balanced investment option for experienced investors looking for better returns with manageable risk levels.",
-    roi: 400,
-  },
-  {
-    id: "premium",
-    name: "Premium Plan",
-    minAmount: 50000,
-    maxAmount: 250000,
-    returnRate: 6,
-    duration: 90,
-    features: [
-      "Strategic investments",
-      "Premium returns",
-      "Weekly payouts",
-      "Priority support",
-    ],
-    description:
-      "Our premium offering for serious investors. High returns with expert portfolio management and exclusive benefits.",
-    roi: 600,
-  },
-];
+export const INVESTMENT_PLANS = ROI_SCHEDULE.map((tier, index) => ({
+  id: tier.id,
+  name: `${tier.name} - $${tier.amount.toLocaleString()}`,
+  minAmount: tier.amount,
+  maxAmount: tier.amount,
+  baseAmount: tier.amount,
+  roiAmount: tier.roiAmount,
+  returnRate: toRate(tier.amount, tier.roiAmount),
+  roi: toRate(tier.amount, tier.roiAmount),
+  duration: [14, 21, 28, 40, 30, 60, 90][index],
+  features: [
+    "Fixed ROI amount",
+    "Clear maturity payout",
+    index < 3 ? "Low entry" : "Priority processing",
+  ],
+  description: `Invest $${tier.amount.toLocaleString()} and receive $${tier.roiAmount.toLocaleString()} ROI at maturity.`,
+  riskLevel: index < 3 ? "low" : index < 5 ? "medium" : "high",
+  isActive: true,
+}));
+
+export const calculateROIAmount = (amount, plan) => {
+  const numericAmount = Number(amount);
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0) return 0;
+
+  if (plan?.baseAmount && plan?.roiAmount) {
+    return Number(
+      ((numericAmount / Number(plan.baseAmount)) * Number(plan.roiAmount)).toFixed(2),
+    );
+  }
+
+  const exactTier = ROI_SCHEDULE.find((tier) => tier.amount === numericAmount);
+  if (exactTier) return exactTier.roiAmount;
+
+  const rate = resolvePlanReturnRate(plan);
+  return Number(((rate / 100) * numericAmount).toFixed(2));
+};
+
+const resolvePlanReturnRate = (plan, investment) => {
+  if (plan?.baseAmount && plan?.roiAmount) {
+    return toRate(plan.baseAmount, plan.roiAmount);
+  }
+  if (plan && typeof plan.returnRate === "number") {
+    return plan.returnRate;
+  }
+  if (plan && typeof plan.roi === "number") {
+    return plan.roi;
+  }
+  if (investment && typeof investment.returnRate === "number") {
+    return investment.returnRate;
+  }
+  return 0;
+};
+
+export const getStaticInvestmentPlanById = (planId) =>
+  INVESTMENT_PLANS.find((p) => p.id === planId);
 
 // Get all investment plans
 export const getInvestmentPlans = async (req, res) => {
   try {
-    // Check if using database or static plans
-    if (process.env.USE_DB_PLANS === "true") {
-      // If using database, fetch from InvestmentPlan model
-      const plans = await InvestmentPlan.find({ isActive: true });
-      return res.status(200).json({
-        success: true,
-        data: plans,
-      });
-    } else {
-      // Return the static INVESTMENT_PLANS constant
-      return res.status(200).json({
-        success: true,
-        data: INVESTMENT_PLANS,
-      });
-    }
+    return res.status(200).json({
+      success: true,
+      data: INVESTMENT_PLANS,
+    });
   } catch (error) {
     console.error("Error fetching investment plans:", error);
     return res.status(500).json({
@@ -139,6 +129,10 @@ export const getUserInvestments = async (req, res) => {
       }
 
       investmentObj.planName = plan.name;
+      const resolvedReturnRate = resolvePlanReturnRate(plan, investment);
+      investmentObj.returnRate = resolvedReturnRate;
+      investmentObj.roi = plan.roi ?? resolvedReturnRate;
+      investmentObj.roiAmount = calculateROIAmount(investment.amount, plan);
 
       if (investment.status === "active") {
         const currentDate = new Date();
@@ -155,8 +149,7 @@ export const getUserInvestments = async (req, res) => {
         investmentObj.progress = progress;
 
         // Expected return at maturity
-        const expectedReturn =
-          (investment.returnRate / 100) * investment.amount;
+        const expectedReturn = calculateROIAmount(investment.amount, plan);
         investmentObj.expectedReturn = expectedReturn;
 
         // Current value based on progress
@@ -167,7 +160,7 @@ export const getUserInvestments = async (req, res) => {
       else if (investment.status === "completed") {
         investmentObj.returnAmount =
           investment.totalReturns ||
-          (investment.returnRate / 100) * investment.amount;
+          calculateROIAmount(investment.amount, plan);
       }
 
       return investmentObj;
@@ -227,6 +220,13 @@ export const createInvestment = async (req, res, next) => {
     if (!plan) {
       throw new ApiError("Invalid investment plan", 400, "validation_error");
     }
+    if (plan.isActive === false) {
+      throw new ApiError(
+        plan.deactivationReason || "This investment plan is unavailable.",
+        400,
+        "plan_inactive",
+      );
+    }
 
     // Validate amount
     if (
@@ -256,11 +256,13 @@ export const createInvestment = async (req, res, next) => {
     endDate.setDate(endDate.getDate() + plan.duration);
 
     // Create investment
+    const resolvedReturnRate = resolvePlanReturnRate(plan);
+    const expectedReturn = calculateROIAmount(amount, plan);
     const investment = new Investment({
       user: user._id,
       planId: plan.id,
       amount: amount,
-      returnRate: plan.roi,
+      returnRate: resolvedReturnRate,
       duration: plan.duration,
       startDate,
       endDate,
@@ -295,7 +297,14 @@ export const createInvestment = async (req, res, next) => {
     res.status(201).json({
       success: true,
       message: "Investment created successfully",
-      data: investment,
+      data: {
+        ...investment.toObject(),
+        id: investment._id,
+        planName: plan.name,
+        roi: plan.roi ?? resolvedReturnRate,
+        roiAmount: expectedReturn,
+        expectedReturn,
+      },
     });
   } catch (error) {
     await session.abortTransaction();
@@ -319,12 +328,17 @@ export const getInvestmentById = async (req, res, next) => {
     }
 
     const plan = INVESTMENT_PLANS.find((p) => p.id === investment.planId);
+    const resolvedReturnRate = resolvePlanReturnRate(plan, investment);
 
     res.status(200).json({
       success: true,
       data: {
         ...investment.toObject(),
         planName: plan?.name || "Unknown Plan",
+        returnRate: resolvedReturnRate,
+        roi: plan?.roi ?? resolvedReturnRate,
+        roiAmount: calculateROIAmount(investment.amount, plan),
+        expectedReturn: calculateROIAmount(investment.amount, plan),
       },
     });
   } catch (error) {
@@ -349,7 +363,7 @@ export const getInvestmentStatistics = async (req, res) => {
     ).length;
     const totalInvested = investments.reduce((sum, inv) => sum + inv.amount, 0);
     const totalReturns = investments.reduce(
-      (sum, inv) => sum + (inv.returns || 0),
+      (sum, inv) => sum + (inv.totalReturns || 0),
       0,
     );
 
@@ -405,13 +419,17 @@ export const cancelInvestment = async (req, res, next) => {
 
     const transaction = new Transaction({
       user: req.user._id,
-      type: "deposit",
+      type: "investment",
       amount: refundAmount,
       currency: "USD",
       status: "completed",
       method: "system",
       description: `Refund for cancelled investment: ${investment.planId}`,
       reference: investment._id.toString(),
+      metadata: {
+        action: "refund",
+        investmentId: investment._id.toString(),
+      },
       processedAt: new Date(),
     });
 
@@ -455,6 +473,9 @@ export const withdrawInvestment = async (req, res, next) => {
       throw new ApiError("Active investment not found", 404, "not_found");
     }
 
+    const plan = INVESTMENT_PLANS.find((p) => p.id === investment.planId);
+    const resolvedReturnRate = resolvePlanReturnRate(plan, investment);
+
     // Calculate current value based on time elapsed
     const currentDate = new Date();
     const startDate = new Date(investment.startDate);
@@ -468,13 +489,14 @@ export const withdrawInvestment = async (req, res, next) => {
 
     // Calculate returns (pro-rated based on time invested)
     const principalAmount = investment.amount;
-    const fullReturnAmount = (investment.returnRate / 100) * principalAmount;
+    const fullReturnAmount = calculateROIAmount(principalAmount, plan);
     const proRatedReturn = fullReturnAmount * progressPercentage;
     const withdrawalAmount = principalAmount + proRatedReturn;
 
     // Update investment status
     investment.status = "completed";
     investment.totalReturns = proRatedReturn;
+    investment.returnRate = resolvedReturnRate;
     investment.endDate = currentDate;
     await investment.save({ session });
 
@@ -488,13 +510,17 @@ export const withdrawInvestment = async (req, res, next) => {
     // Create transaction record for the withdrawal
     const transaction = new Transaction({
       user: req.user._id,
-      type: "deposit",
+      type: "investment",
       amount: withdrawalAmount,
       currency: "USD",
       status: "completed",
       method: "system",
       description: `Early withdrawal from investment: ${investment.planId} (principal + pro-rated returns)`,
       reference: investment._id.toString(),
+      metadata: {
+        action: "early_withdrawal",
+        investmentId: investment._id.toString(),
+      },
       processedAt: new Date(),
     });
 

@@ -10,7 +10,16 @@ const OrderSchema = new mongoose.Schema(
     symbol: {
       type: String,
       required: true,
+    },
+    market: {
+      type: String,
+      enum: ["crypto", "forex", "cfd"],
+      default: "crypto",
       index: true,
+    },
+    accountLabel: {
+      type: String,
+      trim: true,
     },
     side: {
       type: String,
@@ -56,6 +65,29 @@ const OrderSchema = new mongoose.Schema(
       default: 0,
     },
     executionPrice: {
+      type: Number,
+    },
+    openPrice: {
+      type: Number,
+    },
+    closePrice: {
+      type: Number,
+    },
+    profit: {
+      type: Number,
+    },
+    swap: {
+      type: Number,
+      default: 0,
+    },
+    commission: {
+      type: Number,
+      default: 0,
+    },
+    deposit: {
+      type: Number,
+    },
+    balance: {
       type: Number,
     },
     fee: {

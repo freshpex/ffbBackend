@@ -37,13 +37,11 @@ const shopOrderSchema = new mongoose.Schema(
       type: String,
       required: true,
       unique: true,
-      index: true,
     },
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
-      index: true,
     },
     items: [orderItemSchema],
     // Pricing
@@ -84,12 +82,12 @@ const shopOrderSchema = new mongoose.Schema(
         "refunded", // Order refunded
       ],
       default: "pending",
-      index: true,
+      // status is part of a compound index below
     },
     // Payment details
     paymentMethod: {
       type: String,
-      enum: ["balance", "crypto", "card"],
+      enum: ["balance", "bonus", "crypto", "card"],
       default: "balance",
     },
     paymentStatus: {
@@ -123,7 +121,6 @@ const shopOrderSchema = new mongoose.Schema(
     deliveredAt: {
       type: Date,
     },
-    // Reward details (200% cashback)
     rewardAmount: {
       type: Number,
       default: 0,
@@ -170,10 +167,12 @@ shopOrderSchema.pre("save", async function (next) {
   next();
 });
 
-// Calculate reward amount (200% of total)
+// Calculate reward amount (cashback rate of total)
 shopOrderSchema.pre("save", function (next) {
   if (this.isNew || this.isModified("total")) {
-    this.rewardAmount = this.total * 2; // 200% cashback
+    // Only reward purchases paid from main balance.
+    const CASHBACK_RATE = 0.2; // 20%
+    this.rewardAmount = this.paymentMethod === "balance" ? this.total * CASHBACK_RATE : 0;
   }
   next();
 });

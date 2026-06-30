@@ -6,6 +6,7 @@ import logger from "../middleware/logger.js";
 import mongoose from "mongoose";
 import LoginActivity from "../models/LoginActivity.js";
 import { googleAuth } from "../controllers/authController.js";
+import { initFirebaseAdmin } from "../services/firebaseAdmin.js";
 
 const router = express.Router();
 
@@ -403,6 +404,48 @@ router.post("/sync", async (req, res) => {
         .status(500)
         .json({ message: "Server error during synchronization" });
     }
+  }
+});
+
+// Sync password from Firebase to local MongoDB
+router.post("/sync-password", async (req, res) => {
+  try {
+    const { idToken, newPassword } = req.body;
+
+    if (!idToken || !newPassword) {
+      return res.status(400).json({ message: "idToken and newPassword are required" });
+    }
+
+    const firebaseAdmin = initFirebaseAdmin();
+    if (!firebaseAdmin || !firebaseAdmin.auth) {
+      logger.error('Firebase Admin SDK not initialized - cannot verify idToken');
+      return res.status(500).json({ message: 'Server misconfiguration: Firebase Admin not available' });
+    }
+
+    // Verify idToken to ensure request is genuine
+    const decoded = await firebaseAdmin.auth().verifyIdToken(idToken).catch(err => {
+      logger.warn('Failed to verify idToken', err);
+      return null;
+    });
+
+    if (!decoded) {
+      return res.status(401).json({ message: 'Invalid or expired idToken' });
+    }
+
+    const uid = decoded.uid;
+    const email = decoded.email;
+
+    const user = await User.findOne({ $or: [{ uid }, { email }] });
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    // Update local password - the pre-save hook will hash the password
+    user.password = newPassword;
+    await user.save();
+
+    return res.json({ message: 'Password synchronized to local database' });
+  } catch (err) {
+    logger.error('Error syncing password:', err);
+    return res.status(500).json({ message: 'Server error during password synchronization' });
   }
 });
 

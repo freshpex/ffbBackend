@@ -2,6 +2,7 @@ import Task from "../models/Task.js";
 import UserTask from "../models/UserTask.js";
 import User from "../models/User.js";
 import Transaction from "../models/Transaction.js";
+import Deposit from "../models/Deposit.js";
 import Notification from "../models/Notification.js";
 import mongoose from "mongoose";
 import logger from "../middleware/logger.js";
@@ -84,6 +85,84 @@ export const syncKycTasksForUser = async (userId, { session } = {}) => {
   }
 };
 
+export const syncDepositTasksForUser = async (userId, { session } = {}) => {
+  if (!userId) return;
+
+  // Find all in-progress deposit tasks for this user
+  const userTasksQuery = UserTask.find({
+    user: userId,
+    status: { $in: ["in_progress", "completed"] },
+  }).populate({
+    path: "task",
+    match: { category: "deposit", isActive: true },
+  });
+  if (session) userTasksQuery.session(session);
+  const userTasks = await userTasksQuery;
+
+  // Filter out tasks where task is null (didn't match category)
+  const depositTasks = userTasks.filter((ut) => ut.task && ut.task.requirements?.minAmount);
+
+  if (depositTasks.length === 0) return;
+
+  for (const userTask of depositTasks) {
+    try {
+      const task = userTask.task;
+      const minAmount = Number(task.requirements.minAmount);
+
+      // Calculate time window if task has duration
+      let startDate = null;
+      let endDate = null;
+      if (task.duration && task.duration > 0 && userTask.startedAt) {
+        startDate = userTask.startedAt;
+        endDate = new Date(userTask.startedAt);
+        endDate.setDate(endDate.getDate() + task.duration);
+      }
+
+      // Get total deposits in the time window
+      const depositTotal = await getUserCompletedDepositTotal(userId, {
+        session,
+        startDate,
+        endDate,
+      });
+
+      const progress = Math.min(
+        100,
+        Math.floor((Number(depositTotal || 0) / minAmount) * 100)
+      );
+
+      const shouldComplete = depositTotal >= minAmount;
+      const nextStatus = shouldComplete ? "completed" : "in_progress";
+      const shouldUpdateStatus = userTask.status !== nextStatus;
+      const shouldUpdateProgress = progress !== userTask.progress;
+
+      if (shouldUpdateStatus || shouldUpdateProgress) {
+        userTask.progress = progress;
+        userTask.status = nextStatus;
+        userTask.completedAt = shouldComplete ? new Date() : null;
+        userTask.relatedData = {
+          ...(userTask.relatedData || {}),
+          accumulatedDeposits: Number(depositTotal || 0),
+        };
+
+        if (shouldComplete && shouldUpdateStatus) {
+          await createNotification(
+            userId,
+            "Task Completed",
+            `Congratulations! You've completed the task: ${task.title}. Claim your reward now!`,
+            "task_completed",
+            { taskId: task._id },
+            session
+          );
+        }
+
+        await userTask.save(session ? { session } : undefined);
+      }
+    } catch (err) {
+      logger.warn(`Deposit task sync error for user ${userId}: ${err.message}`);
+    }
+  }
+};
+
 // Helper function to create notifications
 const createNotification = async (userId, title, message, type, metadata = {}, session) => {
   const notification = new Notification({
@@ -109,6 +188,50 @@ const mapNotificationType = (taskType) => {
   };
   
   return typeMap[taskType] || 'info';  // Default to 'info' if type not found
+};
+
+const getUserCompletedDepositTotal = async (userId, { session, startDate, endDate } = {}) => {
+  const matchUserId =
+    typeof userId === "string" ? new mongoose.Types.ObjectId(userId) : userId;
+
+  const depMatch = {
+    user: matchUserId,
+    status: "completed",
+    currency: { $in: ["USD", "USDT"] },
+  };
+
+  if (startDate) depMatch.createdAt = { ...(depMatch.createdAt || {}), $gte: new Date(startDate) };
+  if (endDate) depMatch.createdAt = { ...(depMatch.createdAt || {}), $lte: new Date(endDate) };
+
+  const depQuery = Deposit.aggregate([
+    { $match: depMatch },
+    { $group: { _id: null, total: { $sum: "$amount" } } },
+  ]);
+  if (session) depQuery.session(session);
+  const depAgg = await depQuery;
+  const depTotal = Number(depAgg?.[0]?.total || 0);
+  if (depTotal > 0) return depTotal;
+
+  const txnMatch = {
+    user: matchUserId,
+    type: "deposit",
+    status: "completed",
+    currency: { $in: ["USD", "USDT"] },
+    $nor: [
+      { "metadata.action": { $in: ["refund", "early_withdrawal"] } },
+      { description: { $regex: "investment", $options: "i" } },
+    ],
+  };
+  if (startDate) txnMatch.createdAt = { ...(txnMatch.createdAt || {}), $gte: new Date(startDate) };
+  if (endDate) txnMatch.createdAt = { ...(txnMatch.createdAt || {}), $lte: new Date(endDate) };
+
+  const txnQuery = Transaction.aggregate([
+    { $match: txnMatch },
+    { $group: { _id: null, total: { $sum: "$amount" } } },
+  ]);
+  if (session) txnQuery.session(session);
+  const txnAgg = await txnQuery;
+  return Number(txnAgg?.[0]?.total || 0);
 };
 
 // Default tasks that are available in the system
@@ -138,7 +261,7 @@ const DEFAULT_TASKS = [
     requirements: {
       minAmount: 50,
     },
-    duration: 14,
+    duration: 3,
     isActive: true,
     maxCompletions: 1,
     tags: ["beginner", "deposit", "onboarding"],
@@ -153,14 +276,14 @@ const DEFAULT_TASKS = [
     requirements: {
       minAmount: 100,
     },
-    duration: 14,
+    duration: 4,
     isActive: true,
     maxCompletions: 1,
     tags: ["deposit", "bonus"],
   },
   {
     title: "Deposit $200+",
-    description: "Make a deposit of $200 or more",
+    description: "Make a deposit of $100 or more",
     category: "deposit",
     reward: 100,
     rewardType: "cash",
@@ -168,7 +291,41 @@ const DEFAULT_TASKS = [
     requirements: {
       minAmount: 200,
     },
-    duration: 14,
+    duration: 5,
+    isActive: true,
+    maxCompletions: 1,
+    tags: ["deposit", "bonus"],
+  },
+  {
+    title: "Refer a Friend — Earn 50% of Their First Deposit",
+    description: "Refer a friend who registers, completes KYC and makes their first deposit. Earn 50% of their first deposit amount as a bonus.",
+    category: "referral",
+    reward: 0,
+    rewardType: "bonus",
+    difficulty: "medium",
+    requirements: {
+      minReferrals: 1,
+      requireKYC: true,
+      requireFirstDeposit: true,
+      rewardPercent: 50
+    },
+    duration: 30,
+    isActive: true,
+    isRecurring: true,
+    maxCompletions: 0,
+    tags: ["referral", "bonus", "first-deposit"]
+  },
+  {
+    title: "Deposit $300+",
+    description: "Make a deposit of $300 or more",
+    category: "deposit",
+    reward: 200,
+    rewardType: "cash",
+    difficulty: "medium",
+    requirements: {
+      minAmount: 300,
+    },
+    duration: 7,
     isActive: true,
     maxCompletions: 1,
     tags: ["deposit", "bonus"],
@@ -177,7 +334,7 @@ const DEFAULT_TASKS = [
     title: "Deposit $500+",
     description: "Make a deposit of $500 or more",
     category: "deposit",
-    reward: 200,
+    reward: 300,
     rewardType: "cash",
     difficulty: "medium",
     requirements: {
@@ -199,7 +356,7 @@ const DEFAULT_TASKS = [
       minAmount: 10,
       orderTypes: ["market", "limit"],
     },
-    duration: 7, // 7 days to complete
+    duration: 7,
     isActive: true,
     maxCompletions: 1,
     tags: ["beginner", "trading"],
@@ -258,9 +415,9 @@ const DEFAULT_TASKS = [
     difficulty: "medium",
     requirements: {
       minPositions: 3,
-      minDuration: 1, // At least 1 day
+      minDuration: 1,
     },
-    duration: 14, // 14 days to complete
+    duration: 14,
     isActive: true,
     maxCompletions: 1,
     tags: ["trading", "strategy"],
@@ -275,7 +432,7 @@ const DEFAULT_TASKS = [
     requirements: {
       minVolume: 5000,
     },
-    duration: 30, // 30 days to complete
+    duration: 30,
     isActive: true,
     maxCompletions: 1,
     tags: ["challenge", "volume"],
@@ -291,10 +448,10 @@ const DEFAULT_TASKS = [
       minDays: 7,
       consecutiveDays: true,
     },
-    duration: 7, // 7 days to complete
+    duration: 7,
     isActive: true,
     isRecurring: true,
-    maxCompletions: 0, // Unlimited completions
+    maxCompletions: 0,
     tags: ["daily", "streak"],
   },
   {
@@ -308,7 +465,7 @@ const DEFAULT_TASKS = [
       minReferrals: 3,
       requireKYC: true,
     },
-    duration: 30, // 30 days to complete
+    duration: 30,
     isActive: true,
     maxCompletions: 1,
     tags: ["referral", "friends"],
@@ -323,7 +480,7 @@ const DEFAULT_TASKS = [
     requirements: {
       modulesCount: 5,
     },
-    duration: 14, // 14 days to complete
+    duration: 14,
     isActive: true,
     maxCompletions: 1,
     tags: ["learning", "education"],
@@ -338,7 +495,7 @@ const DEFAULT_TASKS = [
     requirements: {
       minAmount: 1000,
     },
-    duration: 14, // 14 days to complete
+    duration: 14,
     isActive: true,
     maxCompletions: 1,
     tags: ["deposit", "bonus"],
@@ -484,6 +641,11 @@ export const getAllTasks = async (req, res, next) => {
       } catch (syncErr) {
         logger.warn(`KYC task sync warning: ${syncErr.message}`);
       }
+      try {
+        await syncDepositTasksForUser(req.user._id);
+      } catch (syncErr) {
+        logger.warn(`Deposit task sync warning: ${syncErr.message}`);
+      }
       userTasks = await UserTask.find({ user: req.user._id });
     }
 
@@ -573,6 +735,11 @@ export const getUserTasks = async (req, res, next) => {
     } catch (syncErr) {
       logger.warn(`KYC task sync warning: ${syncErr.message}`);
     }
+    try {
+      await syncDepositTasksForUser(req.user._id);
+    } catch (syncErr) {
+      logger.warn(`Deposit task sync warning: ${syncErr.message}`);
+    }
     
     if (status) {
       query.status = status;
@@ -612,6 +779,11 @@ export const startTask = async (req, res, next) => {
     if (!task) {
       throw new ApiError("Task not found", 404, "not_found");
     }
+
+    const isDepositTaskWithMin =
+      task.category === "deposit" &&
+      typeof task.requirements?.minAmount === "number" &&
+      task.requirements.minAmount > 0;
     
     if (!task.isActive) {
       throw new ApiError("Task is not active", 400, "inactive_task");
@@ -636,8 +808,60 @@ export const startTask = async (req, res, next) => {
       
       // If task is in progress, just return it
       if (existingUserTask.status === "in_progress") {
+        if (isDepositTaskWithMin) {
+          const startDate = existingUserTask.startedAt || null;
+          const endDate = existingUserTask.expiresAt || null;
+          const depositTotal = await getUserCompletedDepositTotal(req.user._id, {
+            session,
+            startDate,
+            endDate,
+          });
+          const minAmount = Number(task.requirements.minAmount);
+          const progress = Math.min(
+            100,
+            Math.floor((Number(depositTotal || 0) / minAmount) * 100),
+          );
+
+          existingUserTask.progress = progress;
+          existingUserTask.relatedData = {
+            ...(existingUserTask.relatedData || {}),
+            accumulatedDeposits: Number(depositTotal || 0),
+          };
+
+          if (depositTotal >= minAmount) {
+            existingUserTask.progress = 100;
+            existingUserTask.status = "completed";
+            existingUserTask.completedAt = new Date();
+          }
+
+          await existingUserTask.save({ session });
+
+          // Notify completion if it auto-completed on start
+          if (existingUserTask.status === "completed") {
+            await createNotification(
+              req.user._id,
+              "Task Completed",
+              `Congratulations! You've completed the task: ${task.title}. Claim your reward now!`,
+              "task_completed",
+              { taskId: task._id },
+              session,
+            );
+          }
+
+          await session.commitTransaction();
+
+          return res.status(200).json({
+            success: true,
+            message:
+              existingUserTask.status === "completed"
+                ? "Task is in progress and has been updated/completed based on your deposits"
+                : "Task is in progress and progress has been refreshed",
+            data: existingUserTask,
+          });
+        }
+
         await session.commitTransaction();
-        
+
         return res.status(200).json({
           success: true,
           message: "Task already in progress",
@@ -651,6 +875,30 @@ export const startTask = async (req, res, next) => {
       existingUserTask.startedAt = new Date();
       existingUserTask.completedAt = null;
       existingUserTask.claimedAt = null;
+
+      // Deposit tasks: count previous completed deposits immediately.
+      if (isDepositTaskWithMin) {
+        const depositTotal = await getUserCompletedDepositTotal(req.user._id, {
+          session,
+        });
+        const minAmount = Number(task.requirements.minAmount);
+        const progress = Math.min(
+          100,
+          Math.floor((Number(depositTotal || 0) / minAmount) * 100),
+        );
+
+        existingUserTask.progress = progress;
+        existingUserTask.relatedData = {
+          ...(existingUserTask.relatedData || {}),
+          accumulatedDeposits: Number(depositTotal || 0),
+        };
+
+        if (depositTotal >= minAmount) {
+          existingUserTask.progress = 100;
+          existingUserTask.status = "completed";
+          existingUserTask.completedAt = new Date();
+        }
+      }
       
       // Set expiry date if task has a duration
       if (task.duration > 0) {
@@ -662,12 +910,27 @@ export const startTask = async (req, res, next) => {
       }
       
       await existingUserTask.save({ session });
+
+      // Notify completion if it auto-completed on restart
+      if (existingUserTask.status === "completed") {
+        await createNotification(
+          req.user._id,
+          "Task Completed",
+          `Congratulations! You've completed the task: ${task.title}. Claim your reward now!`,
+          "task_completed",
+          { taskId: task._id },
+          session,
+        );
+      }
       
       await session.commitTransaction();
       
       return res.status(200).json({
         success: true,
-        message: "Task restarted successfully",
+        message:
+          existingUserTask.status === "completed"
+            ? "Task restarted and completed based on your previous deposits"
+            : "Task restarted successfully",
         data: existingUserTask,
       });
     }
@@ -682,6 +945,30 @@ export const startTask = async (req, res, next) => {
       rewardType: task.rewardType,
       rewardAmount: task.reward,
     });
+
+    // Deposit tasks: initialize from historical completed deposits.
+    if (isDepositTaskWithMin) {
+      const depositTotal = await getUserCompletedDepositTotal(req.user._id, {
+        session,
+      });
+      const minAmount = Number(task.requirements.minAmount);
+      const progress = Math.min(
+        100,
+        Math.floor((Number(depositTotal || 0) / minAmount) * 100),
+      );
+
+      userTask.progress = progress;
+      userTask.relatedData = {
+        ...(userTask.relatedData || {}),
+        accumulatedDeposits: Number(depositTotal || 0),
+      };
+
+      if (depositTotal >= minAmount) {
+        userTask.progress = 100;
+        userTask.status = "completed";
+        userTask.completedAt = new Date();
+      }
+    }
     
     // Set expiry date if task has a duration
     if (task.duration > 0) {
@@ -701,12 +988,27 @@ export const startTask = async (req, res, next) => {
       { taskId: task._id },
       session
     );
+
+    // If it was instantly completed (e.g., deposit total already meets requirement), notify completion.
+    if (userTask.status === "completed") {
+      await createNotification(
+        req.user._id,
+        "Task Completed",
+        `Congratulations! You've completed the task: ${task.title}. Claim your reward now!`,
+        "task_completed",
+        { taskId: task._id },
+        session,
+      );
+    }
     
     await session.commitTransaction();
     
     res.status(201).json({
       success: true,
-      message: "Task started successfully",
+      message:
+        userTask.status === "completed"
+          ? "Task started and completed based on your previous deposits"
+          : "Task started successfully",
       data: userTask,
     });
   } catch (error) {
@@ -820,6 +1122,38 @@ export const claimTaskReward = async (req, res, next) => {
       throw new ApiError("Completed task not found", 404, "not_found");
     }
     
+    if (
+      userTask.task?.category === "deposit" &&
+      typeof userTask.task?.requirements?.minAmount === "number"
+    ) {
+      const depositTotal = await getUserCompletedDepositTotal(req.user._id, {
+        session,
+        startDate: userTask.startedAt || null,
+        endDate: userTask.expiresAt || null,
+      });
+      const minAmount = Number(userTask.task.requirements.minAmount);
+      if (depositTotal < minAmount) {
+        const progress = Math.min(
+          100,
+          Math.floor((Number(depositTotal || 0) / minAmount) * 100),
+        );
+        userTask.status = "in_progress";
+        userTask.progress = progress;
+        userTask.completedAt = null;
+        userTask.relatedData = {
+          ...(userTask.relatedData || {}),
+          accumulatedDeposits: Number(depositTotal || 0),
+        };
+        await userTask.save({ session });
+
+        throw new ApiError(
+          "Deposit requirement not met. This task has been reset.",
+          400,
+          "deposit_requirement_not_met",
+        );
+      }
+    }
+
     // Get user
     const user = await User.findById(req.user._id).session(session);
     
@@ -917,15 +1251,16 @@ export const getTaskStatistics = async (req, res, next) => {
     
     // Get all user tasks
     const userTasks = await UserTask.find({ user: userId }).populate("task");
+    const validUserTasks = userTasks.filter((task) => task.task);
     
     // Calculate statistics
-    const totalTasks = userTasks.length;
-    const completedTasks = userTasks.filter(task => task.status === "completed" || task.status === "claimed").length;
-    const inProgressTasks = userTasks.filter(task => task.status === "in_progress").length;
-    const expiredTasks = userTasks.filter(task => task.status === "expired").length;
+    const totalTasks = validUserTasks.length;
+    const completedTasks = validUserTasks.filter(task => task.status === "completed" || task.status === "claimed").length;
+    const inProgressTasks = validUserTasks.filter(task => task.status === "in_progress").length;
+    const expiredTasks = validUserTasks.filter(task => task.status === "expired").length;
     
     // Calculate total earnings from tasks
-    const totalEarnings = userTasks.reduce((sum, task) => {
+    const totalEarnings = validUserTasks.reduce((sum, task) => {
       if (task.status === "claimed") {
         return sum + (task.rewardAmount || task.task.reward);
       }
@@ -937,7 +1272,7 @@ export const getTaskStatistics = async (req, res, next) => {
     
     // Group tasks by category
     const categoryCounts = {};
-    userTasks.forEach(userTask => {
+    validUserTasks.forEach(userTask => {
       const category = userTask.task.category;
       if (!categoryCounts[category]) {
         categoryCounts[category] = {
@@ -958,7 +1293,7 @@ export const getTaskStatistics = async (req, res, next) => {
     const threeDaysFromNow = new Date();
     threeDaysFromNow.setDate(threeDaysFromNow.getDate() + 3);
     
-    const expiringTasksCount = userTasks.filter(task => 
+    const expiringTasksCount = validUserTasks.filter(task => 
       task.status === "in_progress" && 
       task.expiresAt && 
       task.expiresAt <= threeDaysFromNow
@@ -1090,23 +1425,85 @@ export const deleteTask = async (req, res, next) => {
 // Process task completion based on events (like order placement, etc.)
 export const processTaskEvent = async (userId, eventType, eventData) => {
   try {
-    // Find active tasks related to this event type
-    const userTasks = await UserTask.find({
-      user: userId,
-      status: "in_progress",
-    }).populate({
-      path: "task",
-      match: {
-        category: mapEventTypeToCategory(eventType),
-        isActive: true,
-      },
+    const category = mapEventTypeToCategory(eventType);
+
+    const tasks = await Task.find({
+      category,
+      isActive: true,
     });
-    
-    // Filter out tasks where the task field is null (due to the match condition)
-    const relevantTasks = userTasks.filter(userTask => userTask.task);
-    
-    if (relevantTasks.length === 0) {
+
+    if (!tasks || tasks.length === 0) {
       return { success: false, message: "No relevant active tasks found" };
+    }
+
+    const relevantTasks = [];
+    for (const task of tasks) {
+      let userTask = await UserTask.findOne({
+        user: userId,
+        task: task._id,
+      });
+
+      if (userTask && userTask.status === "claimed" && !task.isRecurring) {
+        continue;
+      }
+
+      if (userTask && task.maxCompletions > 0 && userTask.completionCount >= task.maxCompletions) {
+        continue;
+      }
+
+      if (!userTask) {
+        userTask = new UserTask({
+          user: userId,
+          task: task._id,
+          status: "in_progress",
+          progress: 0,
+          startedAt: new Date(),
+          rewardType: task.rewardType,
+          rewardAmount: task.reward,
+        });
+
+        if (task.category === "deposit" && typeof task.requirements?.minAmount === "number") {
+          const startDate = task.duration > 0 ? new Date(Date.now() - task.duration * 24 * 60 * 60 * 1000) : null;
+          const depositTotal = await getUserCompletedDepositTotal(userId, {
+            startDate,
+          });
+          const minAmount = Number(task.requirements.minAmount);
+          const progress = Math.min(
+            100,
+            Math.floor((Number(depositTotal || 0) / minAmount) * 100),
+          );
+
+          userTask.progress = progress;
+          userTask.relatedData = {
+            accumulatedDeposits: Number(depositTotal || 0),
+          };
+
+          if (depositTotal >= minAmount) {
+            userTask.progress = 100;
+            userTask.status = "completed";
+            userTask.completedAt = new Date();
+          }
+        }
+
+        if (task.duration > 0) {
+          const expiryDate = new Date();
+          expiryDate.setDate(expiryDate.getDate() + task.duration);
+          userTask.expiresAt = expiryDate;
+        }
+
+        await userTask.save();
+      } else if (userTask.status !== "in_progress" && userTask.status !== "completed") {
+        userTask.status = "in_progress";
+        userTask.startedAt = new Date();
+        await userTask.save();
+      }
+
+      userTask.task = task;
+      relevantTasks.push(userTask);
+    }
+
+    if (relevantTasks.length === 0) {
+      return { success: false, message: "No relevant active tasks to process" };
     }
     
     // Process each relevant task
@@ -1287,11 +1684,28 @@ const calculateTaskProgress = (task, eventType, eventData, userTask) => {
       
     case 'deposit':
       if (requirements?.minAmount) {
-        const depositAmount = eventData.amount || 0;
-        if (depositAmount >= requirements.minAmount) {
+        const minAmount = Number(requirements.minAmount);
+        const delta = Number(eventData.amount || 0);
+
+        // Option C: if task is configured to use the task window, only count deposits
+        // that occurred between task startedAt and expiresAt (if set).
+        let includeDelta = true;
+        const useWindow = !!(requirements.useTaskWindow || task.duration > 0);
+        if (useWindow && userTask.startedAt) {
+          const eventTime = eventData.processedAt ? new Date(eventData.processedAt) : new Date();
+          if (userTask.startedAt && new Date(userTask.startedAt) > eventTime) includeDelta = false;
+          if (userTask.expiresAt && new Date(userTask.expiresAt) < eventTime) includeDelta = false;
+        }
+
+        const currentTotal = Number(userTask.relatedData?.accumulatedDeposits || 0) + (includeDelta && Number.isFinite(delta) ? delta : 0);
+
+        if (!userTask.relatedData) userTask.relatedData = {};
+        userTask.relatedData.accumulatedDeposits = currentTotal;
+
+        if (currentTotal >= minAmount) {
           progress = 100;
         } else {
-          progress = Math.min(100, Math.floor((depositAmount / requirements.minAmount) * 100));
+          progress = Math.min(100, Math.floor((currentTotal / minAmount) * 100));
         }
       }
       break;
@@ -1309,6 +1723,11 @@ const calculateTaskProgress = (task, eventType, eventData, userTask) => {
   }
   
   return progress;
+};
+
+// For unit tests
+export const __testables = {
+  calculateTaskProgress,
 };
 
 // Hook task system into various events

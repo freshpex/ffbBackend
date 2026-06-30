@@ -1,10 +1,11 @@
 import User from "../models/User.js";
 import LoginActivity from "../models/LoginActivity.js";
-import bcrypt from "bcryptjs";
+import bcrypt from "bcrypt";
 import speakeasy from "speakeasy";
 import QRCode from "qrcode";
 import logger from "../middleware/logger.js";
 import { ApiError } from "../middleware/errorHandler.js";
+import { getAdminRecipientEmails, sendTemplateEmail } from "../services/emailService.js";
 
 // Change password
 export const changePassword = async (req, res, next) => {
@@ -34,18 +35,37 @@ export const changePassword = async (req, res, next) => {
     if (!user) {
       throw new ApiError("User not found", 404, "not_found");
     }
+    
+    const hasLocalPassword = typeof user.password === "string" &&
+      user.password.length > 0;
 
-    // Verify current password
-    const isPasswordValid = await bcrypt.compare(
-      currentPassword,
-      user.password,
-    );
+    let allowedWithoutVerification = false;
 
-    if (!isPasswordValid) {
-      throw new ApiError(
-        "Current password is incorrect",
-        400,
-        "invalid_password",
+    if (hasLocalPassword) {
+      const isPasswordValid = await bcrypt.compare(currentPassword, user.password);
+
+      if (!isPasswordValid) {
+        
+        logger.warn("Password mismatch on change attempt", {
+          userId: user._id?.toString(),
+          email: user.email,
+          hasLocalPassword,
+          uidPresent: !!user.uid,
+          currentPasswordLength: currentPassword ? currentPassword.length : 0,
+        });
+
+        if (user.uid) {
+          allowedWithoutVerification = true;
+          logger.info(
+            `User ${user.email} has an external UID (${user.uid}); allowing password set despite current password mismatch`,
+          );
+        } else {
+          throw new ApiError("Current password is incorrect", 400, "invalid_password");
+        }
+      }
+    } else {
+      logger.info(
+        `User ${user.email} has no local password; allowing password set via authenticated endpoint`,
       );
     }
 
@@ -58,9 +78,68 @@ export const changePassword = async (req, res, next) => {
 
     await user.save();
 
+    // Email notifications (non-blocking)
+    try {
+      const time = new Date().toISOString();
+      const ip = req.ip || req.headers["x-forwarded-for"] || "";
+      const userAgent = req.headers["user-agent"] || "";
+
+      // Notify user
+      sendTemplateEmail({
+        templateKey: "password_changed_user",
+        to: [{ email: user.email, name: `${user.firstName || ""} ${user.lastName || ""}`.trim() }],
+        variables: {
+          name: `${user.firstName || ""} ${user.lastName || ""}`.trim() || "Customer",
+          email: user.email,
+          userId: user._id?.toString(),
+          time,
+          ip,
+          userAgent,
+        },
+        customId: "event:password-changed:user",
+      }).catch((err) => {
+        logger.error("Failed to send password changed email to user", {
+          message: err?.message,
+          userId: user._id?.toString(),
+        });
+      });
+
+      // Notify admins
+      const adminEmails = await getAdminRecipientEmails();
+      if (adminEmails.length) {
+        sendTemplateEmail({
+          templateKey: "password_changed_admin",
+          to: adminEmails,
+          variables: {
+            name: `${user.firstName || ""} ${user.lastName || ""}`.trim() || "(no name)",
+            email: user.email,
+            userId: user._id?.toString(),
+            time,
+            ip,
+            userAgent,
+          },
+          customId: "event:password-changed:admin",
+        }).catch((err) => {
+          logger.error("Failed to send password changed admin email", {
+            message: err?.message,
+            userId: user._id?.toString(),
+          });
+        });
+      }
+    } catch (err) {
+      logger.error("Password change email setup failed", {
+        message: err?.message,
+        userId: user._id?.toString(),
+      });
+    }
+
+    // Indicate to client if we set the password without verifying the previous one
     res.status(200).json({
       success: true,
       message: "Password changed successfully",
+      ...(allowedWithoutVerification && {
+        note: "Password was set without verifying the previous password because account is linked to an external auth provider",
+      }),
     });
   } catch (error) {
     logger.error("Error changing password:", error);
@@ -309,6 +388,140 @@ export const getSecurityStatus = async (req, res, next) => {
   }
 };
 
+// Set or update withdrawal PIN
+export const setWithdrawalPin = async (req, res, next) => {
+  try {
+    const { pin, confirmPin, currentPin } = req.body || {};
+
+    if (!pin || !confirmPin) {
+      throw new ApiError(
+        "PIN and confirm PIN are required",
+        400,
+        "validation_error",
+      );
+    }
+
+    if (pin !== confirmPin) {
+      throw new ApiError("PIN values do not match", 400, "validation_error");
+    }
+
+    if (!/^\d{4,6}$/.test(String(pin))) {
+      throw new ApiError(
+        "Withdrawal PIN must be 4 to 6 digits",
+        400,
+        "validation_error",
+      );
+    }
+
+    const user = await User.findById(req.user._id).select("+withdrawalPinHash email firstName lastName");
+
+    if (!user) {
+      throw new ApiError("User not found", 404, "not_found");
+    }
+
+    const hadExistingPin = !!user.withdrawalPinHash;
+
+    if (hadExistingPin) {
+      if (!currentPin) {
+        throw new ApiError(
+          "Current PIN is required to update withdrawal PIN",
+          400,
+          "current_pin_required",
+        );
+      }
+
+      const isCurrentPinValid = await bcrypt.compare(
+        String(currentPin),
+        user.withdrawalPinHash,
+      );
+
+      if (!isCurrentPinValid) {
+        throw new ApiError("Current PIN is incorrect", 400, "invalid_pin");
+      }
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    user.withdrawalPinHash = await bcrypt.hash(String(pin), salt);
+
+    // Clear any pending OTP when PIN changes
+    user.withdrawalOtp = {
+      codeHash: null,
+      expiresAt: null,
+      attempts: 0,
+      lastSentAt: null,
+    };
+
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: hadExistingPin
+        ? "Withdrawal PIN updated successfully"
+        : "Withdrawal PIN set successfully",
+      data: {
+        hasWithdrawalPin: true,
+      },
+    });
+  } catch (error) {
+    logger.error("Error setting withdrawal PIN:", error);
+    next(error);
+  }
+};
+
+// Get withdrawal PIN status
+export const getWithdrawalPinStatus = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user._id).select("+withdrawalPinHash");
+
+    if (!user) {
+      throw new ApiError("User not found", 404, "not_found");
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        hasWithdrawalPin: !!user.withdrawalPinHash,
+      },
+    });
+  } catch (error) {
+    logger.error("Error fetching withdrawal PIN status:", error);
+    next(error);
+  }
+};
+
+export const verifyWithdrawalPin = async (req, res, next) => {
+  try {
+    const { pin } = req.body || {};
+
+    if (!pin) {
+      throw new ApiError("PIN is required", 400, "validation_error");
+    }
+
+    const user = await User.findById(req.user._id).select("+withdrawalPinHash");
+
+    if (!user) {
+      throw new ApiError("User not found", 404, "not_found");
+    }
+
+    if (!user.withdrawalPinHash) {
+      throw new ApiError("Please set a card PIN before viewing card details", 400, "pin_not_set");
+    }
+
+    const isValid = await bcrypt.compare(String(pin), user.withdrawalPinHash);
+    if (!isValid) {
+      throw new ApiError("PIN is incorrect", 401, "invalid_pin");
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "PIN verified",
+    });
+  } catch (error) {
+    logger.error("Error verifying withdrawal PIN:", error);
+    next(error);
+  }
+};
+
 export default {
   changePassword,
   setup2FA,
@@ -316,4 +529,7 @@ export default {
   disable2FA,
   getLoginActivity,
   getSecurityStatus,
+  setWithdrawalPin,
+  getWithdrawalPinStatus,
+  verifyWithdrawalPin,
 };

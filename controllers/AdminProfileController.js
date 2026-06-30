@@ -4,6 +4,7 @@ import path from "path";
 import fs from "fs";
 import { ApiError } from "../middleware/errorHandler.js";
 import logger from "../middleware/logger.js";
+import { getAdminRecipientEmails, sendTemplateEmail } from "../services/emailService.js";
 
 // Configure multer storage for admin profile images
 const storage = multer.diskStorage({
@@ -144,9 +145,169 @@ export const uploadAdminProfileImage = async (req, res, next) => {
   }
 };
 
+// Change admin password
+export const changeAdminPassword = async (req, res, next) => {
+  try {
+    const adminId = req.user?._id;
+    const { currentPassword, newPassword } = req.body || {};
+
+    if (!currentPassword || !newPassword) {
+      throw new ApiError(
+        "Current password and new password are required",
+        400,
+        "validation_error",
+      );
+    }
+
+    if (typeof newPassword !== "string" || newPassword.length < 8) {
+      throw new ApiError(
+        "New password must be at least 8 characters long",
+        400,
+        "validation_error",
+      );
+    }
+
+    const admin = await User.findById(adminId);
+    if (!admin || !["admin", "superadmin"].includes(admin.role)) {
+      throw new ApiError("Admin not found", 404, "not_found");
+    }
+
+    const isMatch = await admin.comparePassword(currentPassword);
+    if (!isMatch) {
+      throw new ApiError("Current password is incorrect", 400, "invalid_password");
+    }
+
+    admin.password = newPassword;
+    await admin.save();
+
+    // Send notifications
+    try {
+      const time = new Date().toISOString();
+      const ip = req.ip || req.headers["x-forwarded-for"] || "";
+      const userAgent = req.headers["user-agent"] || "";
+
+      // Notify the admin whose password changed
+      if (admin.email) {
+        sendTemplateEmail({
+          templateKey: "password_changed_user",
+          to: admin.email,
+          variables: {
+            name: `${admin.firstName || ""} ${admin.lastName || ""}`.trim() || "Admin",
+            time,
+            ip,
+            userAgent,
+          },
+          customId: "event:password-changed:admin-self",
+        }).catch((err) => {
+          logger.error("Failed to send admin password changed email", {
+            message: err?.message,
+            adminId: admin._id?.toString(),
+          });
+        });
+      }
+
+      // Notify other admins
+      const adminEmails = await getAdminRecipientEmails();
+      if (adminEmails.length) {
+        sendTemplateEmail({
+          templateKey: "password_changed_admin",
+          to: adminEmails,
+          variables: {
+            name: `${admin.firstName || ""} ${admin.lastName || ""}`.trim() || "(no name)",
+            email: admin.email,
+            userId: admin._id?.toString(),
+            time,
+            ip,
+            userAgent,
+          },
+          customId: "event:password-changed:admin-notify",
+        }).catch((err) => {
+          logger.error("Failed to send admin password changed admin-notify email", {
+            message: err?.message,
+            adminId: admin._id?.toString(),
+          });
+        });
+      }
+    } catch (err) {
+      logger.error("Admin password change email setup failed", {
+        message: err?.message,
+        adminId: admin._id?.toString(),
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Password changed successfully",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Get admin preferences/settings
+export const getAdminPreferences = async (req, res, next) => {
+  try {
+    const adminId = req.user?._id;
+    const admin = await User.findById(adminId).select("settings role");
+
+    if (!admin || !["admin", "superadmin"].includes(admin.role)) {
+      throw new ApiError("Admin not found", 404, "not_found");
+    }
+
+    res.status(200).json({
+      success: true,
+      data: admin.settings || {},
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Update admin preferences/settings
+export const updateAdminPreferences = async (req, res, next) => {
+  try {
+    const adminId = req.user?._id;
+    const { settings } = req.body || {};
+
+    if (!settings || typeof settings !== "object") {
+      throw new ApiError("Settings object is required", 400, "validation_error");
+    }
+
+    const admin = await User.findById(adminId);
+    if (!admin || !["admin", "superadmin"].includes(admin.role)) {
+      throw new ApiError("Admin not found", 404, "not_found");
+    }
+
+    // Merge allowed settings only
+    admin.settings = {
+      ...(admin.settings || {}),
+      ...settings,
+      notifications: {
+        ...(admin.settings?.notifications || {}),
+        ...(settings.notifications || {}),
+        email: settings.notifications?.email ?? admin.settings?.notifications?.email,
+        app: settings.notifications?.app ?? admin.settings?.notifications?.app,
+      },
+    };
+
+    await admin.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Preferences updated successfully",
+      data: admin.settings || {},
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export default {
   upload,
   getAdminProfile,
   updateAdminProfile,
   uploadAdminProfileImage,
+  changeAdminPassword,
+  getAdminPreferences,
+  updateAdminPreferences,
 };

@@ -31,7 +31,7 @@ export const getAccountSummary = async (req, res, next) => {
 
     // Calculate projected earnings
     const projectedEarnings = investments.reduce((sum, investment) => {
-      const roi = investment.expectedReturn / 100;
+      const roi = (investment.returnRate || 0) / 100;
       return sum + investment.amount * roi;
     }, 0);
 
@@ -72,11 +72,15 @@ export const getAccountSummary = async (req, res, next) => {
     // Format data for response
     const accountSummary = {
       availableBalance: user.balance || "N/A",
+      bonusBalance: user.bonusBalance || 0,
       totalInvestments,
       totalAssets: totalBalance + totalInvestments,
       projectedEarnings,
       totalDeposits: totalDeposits[0]?.total || 0,
       totalWithdrawals: totalWithdrawals[0]?.total || 0,
+      bonusConversionEligible:
+        (totalDeposits[0]?.total || 0) >= 300,
+      bonusConversionMinDepositRequired: 300,
       currency: "USD",
       accountNumber: user.accountNumber || "N/A",
       accountType: user.accountType || "Standard",
@@ -163,7 +167,7 @@ export const getFinancialHighlights = async (req, res, next) => {
       0,
     );
     const totalReturns = investments.reduce(
-      (sum, inv) => sum + (inv.returns || 0),
+      (sum, inv) => sum + (inv.totalReturns || 0),
       0,
     );
 
@@ -365,7 +369,7 @@ export const getDashboardData = async (req, res, next) => {
       totalInvestments,
       totalAssets: (user.balance || 0) + totalInvestments,
       projectedEarnings: investments.reduce((sum, investment) => {
-        const roi = investment.expectedReturn / 100;
+        const roi = (investment.returnRate || 0) / 100;
         return sum + investment.amount * roi;
       }, 0),
       currency: "USD",
@@ -523,7 +527,7 @@ export const getDashboardOverview = async (req, res, next) => {
           0,
         );
         const totalReturns = investments.reduce(
-          (sum, inv) => sum + (inv.returns || 0),
+          (sum, inv) => sum + (inv.totalReturns || 0),
           0,
         );
 

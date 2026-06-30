@@ -11,7 +11,9 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "check-admin": "node scripts/checkAndCreateAdmin.js",
-    "reset-admin": "node scripts/resetAdminPassword.js"
+    "reset-admin": "node scripts/resetAdminPassword.js",
+    "backfill-account-numbers": "node scripts/backfillAccountNumbers.js"
+    ,"hash-impersonation-key": "node scripts/generateImpersonationMasterKeyHash.js"
   },
   "engines": {
     "node": ">=14.0.0"
@@ -37,6 +39,7 @@
     "express": "^4.18.2",
     "express-rate-limit": "^7.5.0",
     "express-validator": "^7.2.1",
+    "firebase-admin": "^11.10.0",
     "handlebars": "^4.7.8",
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
@@ -56,7 +59,7 @@
     "swagger-ui-express": "^5.0.0",
     "technicalindicators": "^3.1.0",
     "uuid": "^13.0.0",
-    "vercel": "^50.1.3",
+    "vercel": "^50.1.6",
     "winston": "^3.11.0",
     "winston-daily-rotate-file": "^4.7.1",
     "ws": "^8.18.1"

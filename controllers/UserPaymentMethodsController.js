@@ -52,6 +52,9 @@ const normalizePaymentMethod = (pm) => {
       expiryMonth: expiryMonth ?? undefined,
       expiryYear: expiryYear ?? undefined,
       cardNumberMasked,
+      cardBrand: details.cardBrand,
+      stripePaymentMethodId: details.stripePaymentMethodId,
+      stripeCustomerId: details.stripeCustomerId,
     };
   }
 
@@ -132,6 +135,7 @@ export const addBankAccount = async (req, res, next) => {
       bankAddress,
       swiftCode,
       nickname,
+      isDefault,
     } = req.body;
 
     // Validate required fields
@@ -155,7 +159,7 @@ export const addBankAccount = async (req, res, next) => {
         bankAddress,
         swiftCode,
       },
-      isDefault: false, // Will set as default if it's the first one
+      isDefault: !!isDefault,
       addedAt: new Date(),
     });
 
@@ -183,7 +187,7 @@ export const addBankAccount = async (req, res, next) => {
 // Add new cryptocurrency wallet
 export const addCryptoWallet = async (req, res, next) => {
   try {
-    const { cryptocurrency, walletAddress, network, nickname } = req.body;
+    const { cryptocurrency, walletAddress, network, nickname, isDefault } = req.body;
 
     // Validate required fields
     if (!cryptocurrency || !walletAddress) {
@@ -203,7 +207,7 @@ export const addCryptoWallet = async (req, res, next) => {
         walletAddress,
         network: network || "mainnet",
       },
-      isDefault: false, // Will set as default if it's the first one
+      isDefault: !!isDefault,
       addedAt: new Date(),
     });
 
@@ -238,6 +242,11 @@ export const addCard = async (req, res, next) => {
       expiryYear,
       expiryDate,
       nickname,
+      isDefault,
+      stripePaymentMethodId,
+      stripeCustomerId,
+      cardBrand,
+      cvv,
     } = req.body;
 
     let month, year;
@@ -269,6 +278,17 @@ export const addCard = async (req, res, next) => {
       throw new ApiError("Invalid card number", 400, "validation_error");
     }
 
+    const monthNum = Number(month);
+    const yearNum = Number(year);
+
+    if (!Number.isInteger(monthNum) || monthNum < 1 || monthNum > 12) {
+      throw new ApiError("Invalid expiry month", 400, "validation_error");
+    }
+
+    if (!Number.isInteger(yearNum) || yearNum < 2020 || yearNum > 2100) {
+      throw new ApiError("Invalid expiry year", 400, "validation_error");
+    }
+
     // Mask card number for storage (keep only last 4 digits)
     const maskedCardNumber = `**** **** **** ${cardNumber.slice(-4)}`;
 
@@ -277,13 +297,16 @@ export const addCard = async (req, res, next) => {
       type: "card",
       nickname: nickname || `Card ending in ${cardNumber.slice(-4)}`,
       details: {
-        cardholderName,
+        cardholderName: String(cardholderName).trim(),
         cardNumber: maskedCardNumber,
-        expiryMonth: month,
-        expiryYear: year,
+        expiryMonth: monthNum,
+        expiryYear: yearNum,
+        cardBrand: cardBrand || undefined,
+        stripePaymentMethodId: stripePaymentMethodId || undefined,
+        stripeCustomerId: stripeCustomerId || undefined,
+        cvvProvided: !!cvv,
       },
-      isDefault: false, // Will set as default if it's the first one
-      addedAt: new Date(),
+      isDefault: !!isDefault,addedAt: new Date(),
     });
 
     const existingMethods = await PaymentMethod.countDocuments({
@@ -326,6 +349,10 @@ export const updatePaymentMethod = async (req, res, next) => {
       walletType,
       walletAddress,
       network,
+      // future Stripe linkage
+      stripePaymentMethodId,
+      stripeCustomerId,
+      cardBrand,
       // explicitly disallow sensitive fields
       cardNumber,
       cvv,
@@ -360,8 +387,15 @@ export const updatePaymentMethod = async (req, res, next) => {
 
     if (paymentMethod.type === "card") {
       if (cardholderName) paymentMethod.details.cardholderName = cardholderName;
-      if (expiryMonth) paymentMethod.details.expiryMonth = String(expiryMonth);
-      if (expiryYear) paymentMethod.details.expiryYear = String(expiryYear);
+      if (expiryMonth) paymentMethod.details.expiryMonth = Number(expiryMonth);
+      if (expiryYear) paymentMethod.details.expiryYear = Number(expiryYear);
+      if (cardBrand) paymentMethod.details.cardBrand = cardBrand;
+      if (stripePaymentMethodId) {
+        paymentMethod.details.stripePaymentMethodId = stripePaymentMethodId;
+      }
+      if (stripeCustomerId) {
+        paymentMethod.details.stripeCustomerId = stripeCustomerId;
+      }
     }
 
     if (paymentMethod.type === "bank_account") {
@@ -377,6 +411,8 @@ export const updatePaymentMethod = async (req, res, next) => {
       if (walletAddress) paymentMethod.details.walletAddress = walletAddress;
       if (network) paymentMethod.details.network = network;
     }
+
+    paymentMethod.markModified("details");
 
     await paymentMethod.save();
 

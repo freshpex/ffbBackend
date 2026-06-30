@@ -103,6 +103,15 @@ export const createOrder = async (req, res, next) => {
           message: `Insufficient balance. Required: $${total.toFixed(2)}, Available: $${user.balance.toFixed(2)}`,
         });
       }
+    } else if (paymentMethod === "bonus") {
+      if ((user.bonusBalance || 0) < total) {
+        logger.warn(`createOrder validation failed: insufficient bonus balance for user ${userId}`, { required: total, available: user.bonusBalance });
+        await session.abortTransaction();
+        return res.status(400).json({
+          success: false,
+          message: `Insufficient bonus balance. Required: $${total.toFixed(2)}, Available: $${Number(user.bonusBalance || 0).toFixed(2)}`,
+        });
+      }
     }
 
     // Create order
@@ -110,7 +119,8 @@ export const createOrder = async (req, res, next) => {
     const timestamp = Date.now().toString(36).toUpperCase();
     const random = Math.random().toString(36).substring(2, 6).toUpperCase();
     const orderNumber = `ORD-${timestamp}-${random}`;
-    const rewardAmount = total * 2;
+    const CASHBACK_RATE = 0.2; // 20%
+    const rewardAmount = paymentMethod === "balance" ? total * CASHBACK_RATE : 0;
 
     logger.info(`Creating shop order for user ${userId} orderNumber=${orderNumber} total=${total}`);
 
@@ -175,10 +185,10 @@ export const createOrder = async (req, res, next) => {
       order[0].status = "paid";
       await order[0].save({ session });
 
-      // Credit 200% reward immediately using atomic update
+      // Credit cashback reward immediately to BONUS balance using atomic update
       const credited = await User.findByIdAndUpdate(
         userId,
-        { $inc: { balance: rewardAmount } },
+        { $inc: { bonusBalance: rewardAmount } },
         { session, new: true },
       );
 
@@ -191,12 +201,12 @@ export const createOrder = async (req, res, next) => {
             amount: rewardAmount,
             currency: "USD",
             status: "completed",
-            description: `200% cashback for order ${order[0].orderNumber}`,
+            description: `20% cashback for order ${order[0].orderNumber}`,
             metadata: {
               orderId: order[0]._id,
               orderNumber: order[0].orderNumber,
               orderTotal: total,
-              rewardPercentage: 200,
+              rewardPercentage: 20,
             },
           },
         ],
@@ -208,8 +218,56 @@ export const createOrder = async (req, res, next) => {
       order[0].rewardCreditedAt = new Date();
       await order[0].save({ session });
 
-      // Use the latest user balance for response
-      user.balance = credited ? credited.balance : updatedAfterDebit.balance;
+      // Use the latest balances for response
+      user.balance = updatedAfterDebit?.balance ?? user.balance;
+      user.bonusBalance = credited?.bonusBalance ?? user.bonusBalance;
+    }
+
+    // Process payment if using BONUS balance (no cashback)
+    if (paymentMethod === "bonus") {
+      const updatedAfterDebit = await User.findByIdAndUpdate(
+        userId,
+        { $inc: { bonusBalance: -total } },
+        { session, new: true },
+      );
+
+      if (!updatedAfterDebit) {
+        await session.abortTransaction();
+        return res
+          .status(404)
+          .json({ success: false, message: "User not found" });
+      }
+
+      await Transaction.create(
+        [
+          {
+            user: userId,
+            type: "shop_purchase",
+            amount: total,
+            currency: "USD",
+            status: "completed",
+            description: `Shop order ${order[0].orderNumber} (paid with bonus)` ,
+            metadata: {
+              orderId: order[0]._id,
+              orderNumber: order[0].orderNumber,
+              itemCount: orderItems.length,
+              paymentSource: "bonus",
+            },
+          },
+        ],
+        { session },
+      );
+
+      order[0].paymentStatus = "completed";
+      order[0].paidAt = new Date();
+      order[0].status = "paid";
+
+      order[0].rewardAmount = 0;
+      order[0].rewardStatus = "cancelled";
+      await order[0].save({ session });
+
+      user.balance = user.balance;
+      user.bonusBalance = updatedAfterDebit?.bonusBalance ?? user.bonusBalance;
     }
 
     // Update product purchase counts
@@ -320,11 +378,15 @@ export const createOrder = async (req, res, next) => {
 
     res.status(201).json({
       success: true,
-      message: `Order created successfully! You've earned $${(total * 2).toFixed(2)} (200% cashback) credited to your account!`,
+      message:
+        paymentMethod === "balance"
+          ? `Order created successfully! You've earned $${(total * CASHBACK_RATE).toFixed(2)} (20% cashback) credited to your BONUS balance!`
+          : "Order created successfully!",
       data: {
         order: order[0],
-        rewardAmount: total * 2,
+        rewardAmount,
         newBalance: user.balance,
+        newBonusBalance: user.bonusBalance,
       },
     });
   } catch (error) {
@@ -446,7 +508,7 @@ export const cancelOrder = async (req, res, next) => {
 
       // Reverse the reward
       if (order.rewardStatus === "credited") {
-        user.balance -= order.rewardAmount;
+        user.bonusBalance = (user.bonusBalance || 0) - (order.rewardAmount || 0);
       }
 
       await user.save({ session });

@@ -6,6 +6,7 @@ import mongoose from "mongoose";
 import crypto from "crypto";
 import logger from "../middleware/logger.js";
 import { ApiError } from "../middleware/errorHandler.js";
+import { sendTemplateEmail } from "../services/emailService.js";
 
 // Helper function to create notifications
 const createNotification = async (userId, title, message, type, metadata = {}, session) => {
@@ -40,7 +41,7 @@ export const getReferralCode = async (req, res, next) => {
       success: true,
       data: {
         referralCode: user.referralCode,
-        referralLink: `${process.env.FRONTEND_URL || "http://localhost:5172"}/register?ref=${user.referralCode}`,
+        referralLink: `${process.env.FRONTEND_URL || "http://localhost:5172"}/signup?ref=${user.referralCode}`,
       },
     });
   } catch (error) {
@@ -554,8 +555,8 @@ export const generateReferralLink = async (req, res, next) => {
       await user.save();
     }
 
-    const baseUrl = process.env.FRONTEND_URL || "https://ffbroker.vercel.app";
-    const referralLink = `${baseUrl}/register?ref=${user.referralCode}`;
+    const baseUrl = process.env.FRONTEND_URL || "https://ffbroker.cam";
+    const referralLink = `${baseUrl}/signup?ref=${user.referralCode}`;
 
     res.status(200).json({
       success: true,
@@ -566,6 +567,79 @@ export const generateReferralLink = async (req, res, next) => {
     });
   } catch (error) {
     logger.error("Error generating referral link:", error);
+    next(error);
+  }
+};
+
+// Invite friends via email with referral link
+export const inviteReferral = async (req, res, next) => {
+  try {
+    // Accept either emails array or single email
+    const raw = req.body?.emails ?? req.body?.email;
+    const emails = Array.isArray(raw) ? raw : raw ? [raw] : [];
+    const message = String(req.body?.message ?? req.body?.personalMessage ?? "");
+
+    const cleaned = Array.from(
+      new Set(
+        emails
+          .filter(Boolean)
+          .map((e) => String(e).trim().toLowerCase())
+          .filter((e) => e.includes("@") && e.includes(".")),
+      ),
+    ).slice(0, 50);
+
+    if (!cleaned.length) {
+      throw new ApiError(
+        "At least one valid recipient email is required",
+        400,
+        "validation_error",
+      );
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) throw new ApiError("User not found", 404, "not_found");
+
+    if (!user.referralCode) {
+      user.referralCode = crypto.randomBytes(4).toString("hex").toUpperCase();
+      await user.save();
+    }
+
+    const baseUrl = process.env.FRONTEND_URL || "https://ffbroker.cam";
+    const referralLink = `${baseUrl}/signup?ref=${user.referralCode}`;
+
+    // Send email to each recipient (do not await serially if many)
+    const inviterName = `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email;
+
+    const sendPromises = cleaned.map((to) =>
+      sendTemplateEmail({
+        templateKey: "referral_invite",
+        to: to,
+        variables: {
+          inviterName,
+          referralLink,
+          message,
+        },
+        customId: `referral:invite:${user._id}`,
+      }),
+    );
+
+    const results = await Promise.all(sendPromises);
+
+    const failed = results.filter((r) => !r.ok);
+
+    if (failed.length) {
+      logger.warn("Some referral invite emails failed", { failedCount: failed.length });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Invites sent",
+      failures: failed.length,
+      invited: cleaned.length,
+      referralLink,
+    });
+  } catch (error) {
+    logger.error("Error sending referral invites:", error);
     next(error);
   }
 };
@@ -679,6 +753,7 @@ export default {
   completeReferral,
   getReferralProgram,
   generateReferralLink,
+  inviteReferral,
   processReferralCommission,
   getCommissionHistory,
 };

@@ -480,8 +480,9 @@ export const getUserPositions = async (req, res, next) => {
     const filledOrders = await Order.find({
       user: userId,
       status: "filled",
+      market: { $ne: "forex" },
     }).select(
-      "symbol side status quantity price executedQuantity executionPrice fee total processedAt createdAt updatedAt"
+      "symbol side status quantity price executedQuantity executionPrice fee total market processedAt createdAt updatedAt"
     );
 
     const { positions: rawPositions, warnings, patches } =

@@ -4,6 +4,7 @@ import LoginActivity from "../models/LoginActivity.js";
 import Referral from "../models/Referral.js";
 import jwt from "jsonwebtoken";
 import config from "../config/config.js";
+import { getAdminRecipientEmails, sendTemplateEmail } from "../services/emailService.js";
 
 export const register = async (req, res, next) => {
   try {
@@ -116,6 +117,31 @@ export const register = async (req, res, next) => {
 
       await user.save();
 
+      // Notify admins of new signup (do not block registration if email fails)
+      try {
+        const adminEmails = await getAdminRecipientEmails();
+        if (adminEmails.length) {
+          sendTemplateEmail({
+            templateKey: "new_signup_admin",
+            to: adminEmails,
+            variables: {
+              name: `${user.firstName || ""} ${user.lastName || ""}`.trim() || "(no name)",
+              email: user.email,
+              userId: user._id?.toString(),
+              country: user.country || "",
+              time: new Date().toISOString(),
+            },
+            customId: "event:new-signup",
+          }).catch((err) => {
+            logger.error("Failed to send new signup admin email", {
+              message: err?.message,
+            });
+          });
+        }
+      } catch (err) {
+        logger.error("New signup admin email setup failed", { message: err?.message });
+      }
+
       // Process referral if a valid referral code was provided
       if (referralCode) {
         const referrer = await User.findOne({ referralCode });
@@ -173,6 +199,7 @@ export const register = async (req, res, next) => {
         lastName: user.lastName,
         role: user.role,
         balance: user.balance,
+        bonusBalance: user.bonusBalance,
         referralCode: user.referralCode,
         kycStatus: user.kycStatus,
         createdAt: user.createdAt,
@@ -287,6 +314,7 @@ export const googleAuth = async (req, res, next) => {
         profileImage: user.profileImage,
         role: user.role,
         balance: user.balance,
+        bonusBalance: user.bonusBalance || 0,
         referralCode: user.referralCode,
         kycStatus: user.kycStatus,
         createdAt: user.createdAt,
