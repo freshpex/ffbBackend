@@ -4,6 +4,10 @@ import User from "../models/User.js";
 import { asyncHandler } from "../middleware/errorHandler.js";
 import mongoose from "mongoose";
 import logger from "../middleware/logger.js";
+import {
+  getWithdrawalEligibility,
+  WITHDRAWAL_ELIGIBILITY_MESSAGE,
+} from "../services/withdrawalEligibilityService.js";
 
 const router = express.Router();
 
@@ -258,6 +262,22 @@ router.post("/withdrawal", async (req, res) => {
 
     if (!user) {
       return res.status(404).json({ message: "User not found" });
+    }
+
+    const withdrawalEligibility = await getWithdrawalEligibility(
+      req.user._id,
+      session,
+    );
+    if (!withdrawalEligibility.eligible) {
+      await session.abortTransaction();
+      return res.status(403).json({
+        success: false,
+        message: WITHDRAWAL_ELIGIBILITY_MESSAGE,
+        error: {
+          message: WITHDRAWAL_ELIGIBILITY_MESSAGE,
+          type: "withdrawal_commitment_required",
+        },
+      });
     }
 
     if (user.balance < amount) {

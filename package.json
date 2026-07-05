@@ -12,8 +12,8 @@
     "format": "prettier --write .",
     "check-admin": "node scripts/checkAndCreateAdmin.js",
     "reset-admin": "node scripts/resetAdminPassword.js",
-    "backfill-account-numbers": "node scripts/backfillAccountNumbers.js"
-    ,"hash-impersonation-key": "node scripts/generateImpersonationMasterKeyHash.js"
+    "backfill-account-numbers": "node scripts/backfillAccountNumbers.js",
+    "hash-impersonation-key": "node scripts/generateImpersonationMasterKeyHash.js"
   },
   "engines": {
     "node": ">=14.0.0"
@@ -29,7 +29,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.89.0",
     "axios": "^1.9.0",
-    "bcrypt": "^5.1.1",
+    "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.2",
     "binance-api-node": "^0.12.9",
     "compression": "^1.7.4",
@@ -39,7 +39,7 @@
     "express": "^4.18.2",
     "express-rate-limit": "^7.5.0",
     "express-validator": "^7.2.1",
-    "firebase-admin": "^11.10.0",
+    "firebase-admin": "^14.1.0",
     "handlebars": "^4.7.8",
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
@@ -48,7 +48,7 @@
     "morgan": "^1.10.0",
     "multer": "^1.4.5-lts.1",
     "node-mailjet": "^6.0.8",
-    "nodemailer": "^7.0.12",
+    "nodemailer": "^9.0.2",
     "qrcode": "^1.5.4",
     "rate-limit-redis": "^4.2.0",
     "redis": "^4.6.10",

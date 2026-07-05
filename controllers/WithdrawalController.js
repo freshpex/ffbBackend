@@ -6,13 +6,16 @@ import crypto from "crypto";
 import logger from "../middleware/logger.js";
 import { ApiError } from "../middleware/errorHandler.js";
 import { sendEmail } from "../services/emailService.js";
+import {
+  getWithdrawalEligibility,
+  WITHDRAWAL_ELIGIBILITY_MESSAGE,
+} from "../services/withdrawalEligibilityService.js";
 
 const WITHDRAWAL_OTP_EXPIRY_MINUTES = 10;
 const WITHDRAWAL_OTP_RESEND_COOLDOWN_SECONDS = 60;
 const MAX_WITHDRAWAL_OTP_ATTEMPTS = 5;
 
-const createOtpCode = () =>
-  `${Math.floor(100000 + Math.random() * 900000)}`;
+const createOtpCode = () => `${Math.floor(100000 + Math.random() * 900000)}`;
 
 const hashOtpCode = (code) =>
   crypto.createHash("sha256").update(String(code)).digest("hex");
@@ -21,29 +24,6 @@ const normalizeAccountNumber = (value) =>
   String(value || "")
     .replace(/\s+/g, "")
     .trim();
-
-const getCompletedDepositTotal = async (userId, session) => {
-  const matchUserId =
-    typeof userId === "string" ? new mongoose.Types.ObjectId(userId) : userId;
-
-  const pipeline = [
-    {
-      $match: {
-        user: matchUserId,
-        type: "deposit",
-        status: "completed",
-        currency: { $in: ["USD", "USDT"] },
-      },
-    },
-    { $group: { _id: null, total: { $sum: "$amount" } } },
-  ];
-
-  const query = Transaction.aggregate(pipeline);
-  if (session) query.session(session);
-
-  const agg = await query;
-  return agg[0]?.total || 0;
-};
 
 // Get all withdrawals for a user
 export const getUserWithdrawals = async (req, res, next) => {
@@ -158,7 +138,12 @@ export const requestWithdrawalOtp = async (req, res, next) => {
     await user.save();
 
     await sendEmail({
-      to: [{ email: user.email, name: `${user.firstName || ""} ${user.lastName || ""}`.trim() }],
+      to: [
+        {
+          email: user.email,
+          name: `${user.firstName || ""} ${user.lastName || ""}`.trim(),
+        },
+      ],
       subject: "Your FFB Withdrawal Verification Code",
       html: `<p>Hello ${user.firstName || "there"},</p><p>Your withdrawal verification code is <strong>${otpCode}</strong>.</p><p>This code expires in ${WITHDRAWAL_OTP_EXPIRY_MINUTES} minutes.</p><p>If you did not request this, please secure your account immediately.</p>`,
       text: `Your withdrawal verification code is ${otpCode}. It expires in ${WITHDRAWAL_OTP_EXPIRY_MINUTES} minutes.`,
@@ -257,7 +242,9 @@ export const createWithdrawal = async (req, res, next) => {
 
     // Reload with secure fields required for withdrawal verification
     const userSecurity = await User.findById(req.user._id)
-      .select("+withdrawalPinHash +withdrawalOtp.codeHash withdrawalOtp.expiresAt withdrawalOtp.attempts")
+      .select(
+        "+withdrawalPinHash +withdrawalOtp.codeHash withdrawalOtp.expiresAt withdrawalOtp.attempts",
+      )
       .session(session);
 
     if (!userSecurity?.withdrawalPinHash) {
@@ -290,7 +277,11 @@ export const createWithdrawal = async (req, res, next) => {
     );
 
     if (!isPinValid) {
-      throw new ApiError("Invalid withdrawal PIN", 401, "invalid_withdrawal_pin");
+      throw new ApiError(
+        "Invalid withdrawal PIN",
+        401,
+        "invalid_withdrawal_pin",
+      );
     }
 
     const otpInfo = userSecurity.withdrawalOtp || {};
@@ -363,18 +354,20 @@ export const createWithdrawal = async (req, res, next) => {
       throw new ApiError(
         "KYC verification required to withdraw funds. Please complete KYC verification in Settings.",
         403,
-        "kyc_required"
+        "kyc_required",
       );
     }
 
-    // Check minimum deposit requirement (500 USDT)
-    const MIN_DEPOSIT_FOR_WITHDRAWAL = 500;
-    const depositTotal = await getCompletedDepositTotal(req.user._id);
-    if (depositTotal < MIN_DEPOSIT_FOR_WITHDRAWAL) {
+    // Require either platform deposit commitment or verified referred users.
+    const withdrawalEligibility = await getWithdrawalEligibility(
+      req.user._id,
+      session,
+    );
+    if (!withdrawalEligibility.eligible) {
       throw new ApiError(
-        `You must have at least ${MIN_DEPOSIT_FOR_WITHDRAWAL} USDT in completed deposits before withdrawing funds. Current deposits: ${depositTotal.toFixed(2)} USDT`,
+        WITHDRAWAL_ELIGIBILITY_MESSAGE,
         403,
-        "insufficient_deposits"
+        "withdrawal_commitment_required",
       );
     }
 
@@ -384,7 +377,7 @@ export const createWithdrawal = async (req, res, next) => {
       throw new ApiError(
         `Minimum withdrawal amount is ${MIN_WITHDRAWAL_AMOUNT} USDT`,
         400,
-        "below_minimum"
+        "below_minimum",
       );
     }
 
@@ -471,7 +464,8 @@ export const createInternalTransfer = async (req, res, next) => {
   session.startTransaction();
 
   try {
-    const rawAccountNumber = req.body?.toAccountNumber || req.body?.accountNumber;
+    const rawAccountNumber =
+      req.body?.toAccountNumber || req.body?.accountNumber;
     const toAccountNumber = normalizeAccountNumber(rawAccountNumber);
     const amount = Number(req.body?.amount);
     const currency = req.body?.currency || "USD";
@@ -486,7 +480,11 @@ export const createInternalTransfer = async (req, res, next) => {
     }
 
     if (!Number.isFinite(amount) || amount <= 0) {
-      throw new ApiError("Valid transfer amount is required", 400, "validation_error");
+      throw new ApiError(
+        "Valid transfer amount is required",
+        400,
+        "validation_error",
+      );
     }
 
     const sender = await User.findById(req.user._id)
@@ -515,7 +513,11 @@ export const createInternalTransfer = async (req, res, next) => {
     }
 
     if (String(recipient._id) === String(sender._id)) {
-      throw new ApiError("You cannot transfer to your own account", 400, "validation_error");
+      throw new ApiError(
+        "You cannot transfer to your own account",
+        400,
+        "validation_error",
+      );
     }
 
     if (Number(sender.balance || 0) < amount) {

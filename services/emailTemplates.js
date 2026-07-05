@@ -1,12 +1,90 @@
 import handlebars from "handlebars";
 
+const SUPPORT_EMAIL = "support@ffbroker.cam";
+
+const escapeHtml = (value = "") =>
+  String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+
+export const plainTextToHtml = (message = "") =>
+  String(message || "")
+    .trim()
+    .split(/\n{2,}/)
+    .filter(Boolean)
+    .map((paragraph) => {
+      const lines = paragraph
+        .split(/\n/)
+        .map((line) => escapeHtml(line))
+        .join("<br/>");
+      return `<p style="margin:0 0 16px">${lines}</p>`;
+    })
+    .join("\n");
+
+export const buildBrandedEmailHtml = ({
+  title,
+  preheader,
+  message,
+  ctaLabel,
+  ctaUrl,
+  footerNote,
+} = {}) => {
+  const safeTitle = escapeHtml(title || "FFB Notification");
+  const safePreheader = escapeHtml(preheader || "");
+  const bodyHtml = plainTextToHtml(message || "");
+  const safeCtaLabel = escapeHtml(ctaLabel || "");
+  const safeCtaUrl = escapeHtml(ctaUrl || "");
+  const safeFooterNote = escapeHtml(
+    footerNote || "Thank you for choosing Fidelity First Brokers.",
+  );
+
+  return `
+    <div style="margin:0;padding:0;background:#0f172a;color:#e5e7eb;font-family:Arial,Helvetica,sans-serif">
+      <div style="display:none;max-height:0;overflow:hidden;opacity:0">${safePreheader}</div>
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#0f172a;padding:28px 12px">
+        <tr>
+          <td align="center">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;background:#111827;border:1px solid #243244;border-radius:14px;overflow:hidden">
+              <tr>
+                <td style="padding:24px 28px;background:#131c2b;border-bottom:1px solid #243244">
+                  <div style="font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:#a78bfa;font-weight:700">Fidelity First Brokers</div>
+                  <h1 style="margin:10px 0 0;color:#ffffff;font-size:24px;line-height:1.25">${safeTitle}</h1>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:28px;color:#d1d5db;font-size:15px;line-height:1.65">
+                  ${bodyHtml}
+                  ${
+                    safeCtaLabel && safeCtaUrl
+                      ? `<p style="margin:24px 0 8px"><a href="${safeCtaUrl}" style="display:inline-block;background:#8133fd;color:#ffffff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:700">${safeCtaLabel}</a></p>`
+                      : ""
+                  }
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:18px 28px;background:#0b1120;border-top:1px solid #243244;color:#94a3b8;font-size:12px;line-height:1.5">
+                  <p style="margin:0 0 8px">${safeFooterNote}</p>
+                  <p style="margin:0">Need help? Contact <a href="mailto:${SUPPORT_EMAIL}" style="color:#c4b5fd">${SUPPORT_EMAIL}</a></p>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </div>
+  `;
+};
+
 // Central registry of default email templates.
 // Templates use Handlebars placeholders, e.g. {{name}}, {{kycLink}}.
 export const DEFAULT_EMAIL_TEMPLATES = Object.freeze({
-  "account_suspended": {
+  account_suspended: {
     description: "Suspicious activity / suspension notice to user",
     subject: "Account Suspended — Action Required",
-    text: (
+    text:
       "Hi {{name}},\n\n" +
       "We detected suspicious activity on your account (logins from other locations and unusually large reward conversions). To protect your funds we have temporarily suspended account activity while we investigate.\n\n" +
       "Immediate actions we took:\n" +
@@ -20,8 +98,7 @@ export const DEFAULT_EMAIL_TEMPLATES = Object.freeze({
       "If you didn’t authorize this activity, please reply to this email immediately and we’ll fast-track your case.\n\n" +
       "Sincerely,\n" +
       "FFB Security Team\n" +
-      "support@ffbroker.cam\n"
-    ),
+      "support@ffbroker.cam\n",
     html: `
       <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.45;color:#111">
         <p>Hi {{name}},</p>
@@ -58,7 +135,7 @@ export const DEFAULT_EMAIL_TEMPLATES = Object.freeze({
     `,
   },
 
-  "password_changed_user": {
+  password_changed_user: {
     description: "Notify the user their password was changed",
     subject: "Your password was changed",
     text:
@@ -84,7 +161,7 @@ export const DEFAULT_EMAIL_TEMPLATES = Object.freeze({
     `,
   },
 
-  "password_changed_admin": {
+  password_changed_admin: {
     description: "Notify admins when a user changes password",
     subject: "User password changed: {{email}}",
     text:
@@ -106,7 +183,7 @@ export const DEFAULT_EMAIL_TEMPLATES = Object.freeze({
     `,
   },
 
-  "new_signup_admin": {
+  new_signup_admin: {
     description: "Notify admins about a new signup",
     subject: "New signup: {{email}}",
     text:
@@ -125,7 +202,54 @@ export const DEFAULT_EMAIL_TEMPLATES = Object.freeze({
       </div>
     `,
   },
-  "referral_invite": {
+  kyc_approved_user: {
+    description: "Notify a user that KYC verification was approved",
+    subject: "Your FFB KYC verification has been approved",
+    text:
+      "Hi {{name}},\n\n" +
+      "Good news. Your identity verification has been approved.\n\n" +
+      "Your FFB account now has verified status, and eligible account features such as withdrawals and platform tasks can continue according to platform rules.\n\n" +
+      "You can review your account from your dashboard: {{dashboardLink}}\n\n" +
+      "Thank you for completing verification.\n\n" +
+      "FFB Compliance Team\n",
+    html: buildBrandedEmailHtml({
+      title: "KYC Verification Approved",
+      preheader: "Your FFB identity verification has been approved.",
+      message:
+        "Hi {{name}},\n\n" +
+        "Good news. Your identity verification has been approved.\n\n" +
+        "Your FFB account now has verified status, and eligible account features such as withdrawals and platform tasks can continue according to platform rules.\n\n" +
+        "Thank you for completing verification.",
+      ctaLabel: "Open Dashboard",
+      ctaUrl: "{{dashboardLink}}",
+      footerNote: "FFB Compliance Team",
+    }),
+  },
+  kyc_rejected_user: {
+    description: "Notify a user that KYC verification was not approved",
+    subject: "Action required: your FFB KYC verification was not approved",
+    text:
+      "Hi {{name}},\n\n" +
+      "We reviewed your identity verification submission, but it was not approved.\n\n" +
+      "{{#if reason}}Reason: {{reason}}\n\n{{/if}}" +
+      "Please review your information and submit clear, valid documents from your account settings page: {{kycLink}}\n\n" +
+      "If you believe this was a mistake, contact support and our team will review your case.\n\n" +
+      "FFB Compliance Team\n",
+    html: buildBrandedEmailHtml({
+      title: "KYC Verification Not Approved",
+      preheader: "Your FFB KYC submission needs attention.",
+      message:
+        "Hi {{name}},\n\n" +
+        "We reviewed your identity verification submission, but it was not approved.\n\n" +
+        "{{#if reason}}Reason: {{reason}}\n\n{{/if}}" +
+        "Please review your information and submit clear, valid documents from your account settings page.\n\n" +
+        "If you believe this was a mistake, contact support and our team will review your case.",
+      ctaLabel: "Review KYC",
+      ctaUrl: "{{kycLink}}",
+      footerNote: "FFB Compliance Team",
+    }),
+  },
+  referral_invite: {
     description: "Invite friends to join using your referral link",
     subject: "Join FFB and get a bonus from {{senderName}}",
     text:
@@ -149,7 +273,7 @@ export const DEFAULT_EMAIL_TEMPLATES = Object.freeze({
     `,
   },
 
-  "referral_invite": {
+  referral_invite: {
     description: "Invite someone via referral link",
     subject: "{{inviterName}} invited you to join FFB",
     text:

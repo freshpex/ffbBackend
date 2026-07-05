@@ -6,6 +6,15 @@ import { ApiError } from "../middleware/errorHandler.js";
 import { createKycNotification } from "../services/notificationService.js";
 import AdminNotification from "../models/AdminNotification.js";
 import { syncKycTasksForUser } from "./TaskController.js";
+import { sendTemplateEmail } from "../services/emailService.js";
+
+const getFrontendUrl = () =>
+  (process.env.FRONTEND_URL || "https://ffbroker.com").replace(/\/$/, "");
+
+const getUserDisplayName = (user) =>
+  `${user?.firstName || ""} ${user?.lastName || ""}`.trim() ||
+  user?.email ||
+  "Customer";
 
 // Get all KYC requests with filtering and pagination
 export const getAllKycRequests = async (req, res, next) => {
@@ -125,7 +134,7 @@ export const approveKycRequest = async (req, res, next) => {
     kycRequest.processedAt = new Date();
 
     await kycRequest.save({ session });
-   const user = await User.findByIdAndUpdate(
+    const user = await User.findByIdAndUpdate(
       kycRequest.user,
       {
         $set: {
@@ -145,6 +154,21 @@ export const approveKycRequest = async (req, res, next) => {
     }
     await createKycNotification(kycRequest, user);
     await session.commitTransaction();
+
+    try {
+      await sendTemplateEmail({
+        templateKey: "kyc_approved_user",
+        to: [{ email: user.email, name: getUserDisplayName(user) }],
+        variables: {
+          name: getUserDisplayName(user),
+          dashboardLink: `${getFrontendUrl()}/login/dashboardpage`,
+          kycLink: `${getFrontendUrl()}/login/accountsettings`,
+        },
+        customId: `event:kyc-approved:${kycRequest._id}`,
+      });
+    } catch (emailError) {
+      logger.warn(`KYC approval email warning: ${emailError.message}`);
+    }
 
     // Log the action
     logger.info(
@@ -221,6 +245,22 @@ export const rejectKycRequest = async (req, res, next) => {
     await createKycNotification(kycRequest, user);
 
     await session.commitTransaction();
+
+    try {
+      await sendTemplateEmail({
+        templateKey: "kyc_rejected_user",
+        to: [{ email: user.email, name: getUserDisplayName(user) }],
+        variables: {
+          name: getUserDisplayName(user),
+          reason,
+          kycLink: `${getFrontendUrl()}/login/accountsettings`,
+          dashboardLink: `${getFrontendUrl()}/login/dashboardpage`,
+        },
+        customId: `event:kyc-rejected:${kycRequest._id}`,
+      });
+    } catch (emailError) {
+      logger.warn(`KYC rejection email warning: ${emailError.message}`);
+    }
 
     // Log the action
     logger.info(
