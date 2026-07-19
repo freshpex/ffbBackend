@@ -6,13 +6,12 @@ import logger from "../middleware/logger.js";
 import { ApiError } from "../middleware/errorHandler.js";
 
 export const ROI_SCHEDULE = Object.freeze([
-  { amount: 100, roiAmount: 500, id: "roi-100", name: "Starter Plan" },
-  { amount: 200, roiAmount: 1000, id: "roi-200", name: "Starter Plus" },
-  { amount: 500, roiAmount: 5000, id: "roi-500", name: "Growth Mini" },
-  { amount: 700, roiAmount: 10000, id: "roi-700", name: "Mini Boost" },
-  { amount: 1000, roiAmount: 15000, id: "roi-1000", name: "Basic Plan" },
-  { amount: 10000, roiAmount: 70000, id: "roi-10000", name: "Standard Plan" },
-  { amount: 50000, roiAmount: 500000, id: "roi-50000", name: "Premium Plan" },
+  { amount: 20, roiAmount: 0.1, id: "roi-0.1", name: "Starter Plan" },
+  // { amount: 50, roiAmount: 0.2, id: "roi-0.2", name: "Growth" },
+  // { amount: 60, roiAmount: 0.3, id: "roi-0.3", name: "Boost" },
+  { amount: 50, roiAmount: 0.4, id: "roi-0.4", name: "Basic Plan" },
+  { amount: 100, roiAmount: 0.5, id: "roi-0.5", name: "Standard Plan" },
+  { amount: 150000, roiAmount: 500000, id: "roi-50000", name: "Premium Plan" },
 ]);
 
 const toRate = (amount, roiAmount) =>

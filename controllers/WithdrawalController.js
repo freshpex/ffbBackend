@@ -7,8 +7,8 @@ import logger from "../middleware/logger.js";
 import { ApiError } from "../middleware/errorHandler.js";
 import { sendEmail } from "../services/emailService.js";
 import {
+  buildWithdrawalEligibilityMessage,
   getWithdrawalEligibility,
-  WITHDRAWAL_ELIGIBILITY_MESSAGE,
 } from "../services/withdrawalEligibilityService.js";
 
 const WITHDRAWAL_OTP_EXPIRY_MINUTES = 10;
@@ -365,7 +365,7 @@ export const createWithdrawal = async (req, res, next) => {
     );
     if (!withdrawalEligibility.eligible) {
       throw new ApiError(
-        WITHDRAWAL_ELIGIBILITY_MESSAGE,
+        buildWithdrawalEligibilityMessage(withdrawalEligibility),
         403,
         "withdrawal_commitment_required",
       );

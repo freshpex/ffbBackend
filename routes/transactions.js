@@ -5,8 +5,8 @@ import { asyncHandler } from "../middleware/errorHandler.js";
 import mongoose from "mongoose";
 import logger from "../middleware/logger.js";
 import {
+  buildWithdrawalEligibilityMessage,
   getWithdrawalEligibility,
-  WITHDRAWAL_ELIGIBILITY_MESSAGE,
 } from "../services/withdrawalEligibilityService.js";
 
 const router = express.Router();
@@ -269,12 +269,14 @@ router.post("/withdrawal", async (req, res) => {
       session,
     );
     if (!withdrawalEligibility.eligible) {
+      const eligibilityMessage =
+        buildWithdrawalEligibilityMessage(withdrawalEligibility);
       await session.abortTransaction();
       return res.status(403).json({
         success: false,
-        message: WITHDRAWAL_ELIGIBILITY_MESSAGE,
+        message: eligibilityMessage,
         error: {
-          message: WITHDRAWAL_ELIGIBILITY_MESSAGE,
+          message: eligibilityMessage,
           type: "withdrawal_commitment_required",
         },
       });
