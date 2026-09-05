@@ -1,6 +1,7 @@
 import express from "express";
 import User from "../models/User.js";
 import Transaction from "../models/Transaction.js";
+import LoginActivity from "../models/LoginActivity.js";
 import Investment from "../models/Investment.js";
 import Order from "../models/Order.js";
 import {
@@ -290,7 +291,26 @@ router.get(
       return res.status(404).json({ message: "User not found" });
     }
 
-    res.status(200).json(user);
+    const [transactions, loginActivities] = await Promise.all([
+      Transaction.find({ user: user._id }).sort({ createdAt: -1 }).limit(10),
+      LoginActivity.find({ userId: user._id }).sort({ timestamp: -1 }).limit(10),
+    ]);
+
+    const latestLoginAt = loginActivities[0]?.timestamp || user.lastLoginAt;
+    const lastActivityAt = [
+      transactions[0]?.createdAt,
+      latestLoginAt,
+      user.updatedAt,
+    ]
+      .filter(Boolean)
+      .sort((a, b) => new Date(b) - new Date(a))[0] || null;
+
+    res.status(200).json({
+      ...user.toObject(),
+      lastLoginAt: latestLoginAt || null,
+      lastActivityAt,
+      recentActivity: { transactions, logins: loginActivities },
+    });
   }),
 );
 

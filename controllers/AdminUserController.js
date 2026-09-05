@@ -1,5 +1,6 @@
 import User from "../models/User.js";
 import Transaction from "../models/Transaction.js";
+import LoginActivity from "../models/LoginActivity.js";
 import mongoose from "mongoose";
 import logger from "../middleware/logger.js";
 import { ApiError } from "../middleware/errorHandler.js";
@@ -80,18 +81,32 @@ export const getUserById = async (req, res, next) => {
       throw new ApiError("User not found", 404, "not_found");
     }
 
-    // Get user's recent transactions
-    const recentTransactions = await Transaction.find({ user: id })
-      .sort({ createdAt: -1 })
-      .limit(5);
+    const [recentTransactions, recentLogins] = await Promise.all([
+      Transaction.find({ user: id }).sort({ createdAt: -1 }).limit(10),
+      LoginActivity.find({ userId: id }).sort({ timestamp: -1 }).limit(10),
+    ]);
+    const latestLoginAt = recentLogins[0]?.timestamp || user.lastLoginAt;
+    const lastActivityAt = [
+      recentTransactions[0]?.createdAt,
+      latestLoginAt,
+      user.updatedAt,
+    ]
+      .filter(Boolean)
+      .sort((a, b) => new Date(b) - new Date(a))[0] || null;
+    const enrichedUser = {
+      ...user.toObject(),
+      lastLoginAt: latestLoginAt || null,
+      lastActivityAt,
+      recentActivity: {
+        transactions: recentTransactions,
+        logins: recentLogins,
+      },
+    };
 
     res.status(200).json({
       success: true,
       data: {
-        user,
-        recentActivity: {
-          transactions: recentTransactions,
-        },
+        user: enrichedUser,
       },
     });
   } catch (error) {

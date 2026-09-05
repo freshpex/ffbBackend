@@ -235,6 +235,18 @@ router.post("/login", async (req, res) => {
         });
     }
 
+    const now = new Date();
+    user.lastLoginAt = now;
+    await user.save();
+    await LoginActivity.create({
+      userId: user._id,
+      timestamp: now,
+      ipAddress: req.ip || req.socket?.remoteAddress || "unknown",
+      device: req.get("user-agent") || "unknown",
+      browser: req.get("user-agent") || "unknown",
+      status: "success",
+    });
+
     const token = jwt.sign(
       { userId: user._id, email: user.email, role: user.role },
       process.env.JWT_SECRET,

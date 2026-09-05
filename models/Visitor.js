@@ -10,6 +10,14 @@ const visitorSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    sessionIds: {
+      type: [String],
+      default: [],
+    },
+    totalSessions: {
+      type: Number,
+      default: 1,
+    },
     browserInfo: {
       userAgent: String,
       language: String,
@@ -72,6 +80,7 @@ const visitorSchema = new mongoose.Schema(
 
 // Index for efficient querying
 visitorSchema.index({ visitorId: 1, sessionId: 1 });
+visitorSchema.index({ visitorId: 1 });
 visitorSchema.index({ "locationInfo.country": 1 });
 visitorSchema.index({ "browserInfo.deviceType": 1 });
 visitorSchema.index({ firstVisit: 1 });

@@ -1,5 +1,28 @@
 import logger from "../middleware/logger.js";
 import Visitor from "../models/Visitor.js";
+import User from "../models/User.js";
+import jwt from "jsonwebtoken";
+
+const getAuthenticatedUser = async (req) => {
+  const authorization = req.headers.authorization || "";
+  const token = authorization.startsWith("Bearer ") ? authorization.slice(7) : null;
+  if (!token) return null;
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    return await User.findById(decoded.userId).select(
+      "firstName lastName email accountNumber status role",
+    );
+  } catch {
+    return null;
+  }
+};
+
+const applyAuthenticatedIdentity = (visitor, user) => {
+  if (!user) return;
+  visitor.userId = user._id;
+  visitor.convertedToUser = true;
+};
 
 // Track a new visitor or update an existing visitor's data
 export const trackVisitor = async (req, res, next) => {
@@ -14,8 +37,13 @@ export const trackVisitor = async (req, res, next) => {
       sessionId
     } = req.body;
 
-    // Check if this visitor and session already exists
-    let visitor = await Visitor.findOne({ visitorId, sessionId });
+    if (!visitorId || !sessionId) {
+      return res.status(400).json({ success: false, message: "Visitor and session IDs are required" });
+    }
+
+    const authenticatedUser = await getAuthenticatedUser(req);
+    // One fingerprint remains one admin row across browser sessions.
+    let visitor = await Visitor.findOne({ visitorId });
 
     if (visitor) {
       visitor.visits.push({
@@ -25,6 +53,14 @@ export const trackVisitor = async (req, res, next) => {
       });
       visitor.lastVisit = timestamp;
       visitor.totalVisits += 1;
+      if (!(visitor.sessionIds || []).includes(sessionId)) {
+        visitor.sessionIds.push(sessionId);
+        visitor.totalSessions = visitor.sessionIds.length;
+      }
+      visitor.sessionId = sessionId;
+      if (browserInfo) visitor.browserInfo = browserInfo;
+      if (locationInfo && !locationInfo.error) visitor.locationInfo = locationInfo;
+      applyAuthenticatedIdentity(visitor, authenticatedUser);
       await visitor.save();
 
       return res.status(200).json({ success: true, sessionId });
@@ -34,12 +70,15 @@ export const trackVisitor = async (req, res, next) => {
     visitor = new Visitor({
       visitorId,
       sessionId,
+      sessionIds: [sessionId],
       browserInfo,
       locationInfo,
       visits: [{ timestamp, path, referrer }],
       firstVisit: timestamp,
       lastVisit: timestamp
     });
+
+    applyAuthenticatedIdentity(visitor, authenticatedUser);
 
     await visitor.save();
     return res.status(201).json({ success: true, sessionId });
@@ -53,16 +92,19 @@ export const trackVisitor = async (req, res, next) => {
 export const trackPageView = async (req, res, next) => {
   try {
     const { visitorId, sessionId, timestamp, path } = req.body;
+    const authenticatedUser = await getAuthenticatedUser(req);
 
-    const visitor = await Visitor.findOne({ visitorId, sessionId });
+    const visitor = await Visitor.findOne({ visitorId });
     if (!visitor) {
       const newVisitor = new Visitor({
         visitorId,
         sessionId,
+        sessionIds: [sessionId],
         visits: [{ timestamp, path }],
         firstVisit: timestamp,
         lastVisit: timestamp
       });
+      applyAuthenticatedIdentity(newVisitor, authenticatedUser);
       await newVisitor.save();
       return res.status(201).json({ success: true });
     }
@@ -72,6 +114,12 @@ export const trackPageView = async (req, res, next) => {
       path
     });
     visitor.lastVisit = timestamp;
+    if (!(visitor.sessionIds || []).includes(sessionId)) {
+      visitor.sessionIds.push(sessionId);
+      visitor.totalSessions = visitor.sessionIds.length;
+    }
+    visitor.sessionId = sessionId;
+    applyAuthenticatedIdentity(visitor, authenticatedUser);
     await visitor.save();
 
     return res.status(200).json({ success: true });
@@ -86,7 +134,7 @@ export const trackExit = async (req, res, next) => {
   try {
     const { visitorId, sessionId, timestamp, path, event } = req.body;
     await Visitor.findOneAndUpdate(
-      { visitorId, sessionId },
+      { visitorId },
       { 
         $set: { lastVisit: timestamp },
         $push: { 
@@ -271,7 +319,10 @@ export const getVisitorDetails = async (req, res, next) => {
   try {
     const { id } = req.params;
     
-    const visitor = await Visitor.findById(id);
+    const visitor = await Visitor.findById(id).populate(
+      "userId",
+      "firstName lastName email accountNumber status role createdAt lastLoginAt",
+    );
     
     if (!visitor) {
       return res.status(404).json({ 
@@ -304,6 +355,7 @@ export const getAllVisitors = async (req, res, next) => {
     const skip = (page - 1) * limit;
     
     const visitors = await Visitor.find()
+      .populate("userId", "firstName lastName email accountNumber status role")
       .sort({ [sortField]: sortOrder })
       .skip(skip)
       .limit(Number(limit));

@@ -23,7 +23,16 @@ const atmCardSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["pending", "active", "frozen", "cancelled", "expired"],
+      enum: [
+        "pending",
+        "active",
+        "frozen",
+        "cancelled",
+        "expired",
+        "processing",
+        "shipped",
+        "rejected",
+      ],
       default: "pending",
     },
     frozen: {
