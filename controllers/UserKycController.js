@@ -73,6 +73,46 @@ export const submitKyc = async (req, res, next) => {
       );
     }
 
+    const allowedDocumentTypes = new Set([
+      "passport",
+      "national_id",
+      "drivers_license",
+    ]);
+    const allowedAddressTypes = new Set([
+      "utility_bill",
+      "bank_statement",
+      "government_letter",
+    ]);
+    if (!allowedDocumentTypes.has(documentType)) {
+      throw new ApiError(
+        "Choose passport, national ID, or driver's licence as your identity document",
+        400,
+        "validation_error",
+      );
+    }
+    if (!allowedAddressTypes.has(proofOfAddressType)) {
+      throw new ApiError(
+        "Choose a utility bill, bank statement, or government letter as proof of address",
+        400,
+        "validation_error",
+      );
+    }
+    if (String(documentNumber).trim().length < 4) {
+      throw new ApiError(
+        "The identity document number is too short",
+        400,
+        "validation_error",
+      );
+    }
+    const parsedDateOfBirth = new Date(dateOfBirth);
+    if (Number.isNaN(parsedDateOfBirth.getTime()) || parsedDateOfBirth >= new Date()) {
+      throw new ApiError(
+        "Enter a valid date of birth in the past",
+        400,
+        "validation_error",
+      );
+    }
+
     // Validate document uploads (match KycRequest schema)
     if (!req.files?.frontImage?.[0]) {
       throw new ApiError("Front ID image is required", 400, "validation_error");
@@ -117,20 +157,20 @@ export const submitKyc = async (req, res, next) => {
       user: userId,
       status: "pending",
       documentType,
-      documentNumber,
+      documentNumber: String(documentNumber).trim(),
       frontImage: frontImageUrl,
       backImage: backImageUrl,
       selfieImage: selfieImageUrl,
       proofOfAddressImage: proofOfAddressImageUrl,
       proofOfAddressType,
-      countryOfIssue,
-      dateOfBirth: new Date(dateOfBirth),
+      countryOfIssue: String(countryOfIssue).trim(),
+      dateOfBirth: parsedDateOfBirth,
       address: {
-        street,
-        city,
-        state,
-        postalCode,
-        country,
+        street: String(street).trim(),
+        city: String(city).trim(),
+        state: String(state).trim(),
+        postalCode: String(postalCode).trim(),
+        country: String(country).trim(),
       },
     });
 

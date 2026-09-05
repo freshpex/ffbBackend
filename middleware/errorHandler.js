@@ -36,6 +36,16 @@ export const errorHandler = (err, req, res, next) => {
     type = "validation_error";
     details = err.errors;
     isOperational = true;
+  } else if (err.name === "MulterError") {
+    statusCode = err.code === "LIMIT_FILE_SIZE" ? 413 : 400;
+    message =
+      err.code === "LIMIT_FILE_SIZE"
+        ? "Each KYC image must be smaller than 5 MB"
+        : err.code === "LIMIT_FILE_COUNT"
+          ? "Upload only the requested KYC images"
+          : "One of the uploaded KYC files could not be accepted";
+    type = "upload_validation_error";
+    isOperational = true;
   } else if (err.name === "CastError") {
     statusCode = 400;
     message = "Invalid ID format";
