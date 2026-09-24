@@ -785,7 +785,13 @@ export const adminGetAllCards = async (req, res, next) => {
 
     // Build query
     const query = {};
-    if (status) query.status = status;
+    if (status) {
+      const statuses = String(status)
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean);
+      query.status = statuses.length > 1 ? { $in: statuses } : statuses[0];
+    }
     if (cardType) query.cardType = cardType;
 
     // Build sort

@@ -234,6 +234,13 @@ const userSchema = new mongoose.Schema(
     },
     passwordResetToken: String,
     passwordResetExpires: Date,
+    passwordResetOtpHash: String,
+    passwordResetOtpExpires: Date,
+    passwordResetOtpLastSentAt: Date,
+    passwordResetOtpAttempts: {
+      type: Number,
+      default: 0,
+    },
     apiKeys: [apiKeySchema],
     settings: {
       theme: {

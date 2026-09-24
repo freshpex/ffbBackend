@@ -97,11 +97,21 @@ export const getNewsById = async (req, res, next) => {
 // Get latest market news (for dashboard)
 export const getLatestNews = async (req, res, next) => {
   try {
-    const { limit = 5 } = req.query;
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 5, 1), 20);
+
+    const newest = await MarketNews.findOne().sort({ publishedAt: -1 }).select("publishedAt");
+    const isStale = !newest || Date.now() - newest.publishedAt.getTime() > 10 * 60_000;
+    if (isStale && process.env.ALPHA_VANTAGE_API_KEY) {
+      try {
+        await fetchNewsFromExternalApi();
+      } catch (refreshError) {
+        logger.warn(`Serving cached market news after provider refresh failed: ${refreshError.message}`);
+      }
+    }
 
     const news = await MarketNews.find()
       .sort({ publishedAt: -1 })
-      .limit(parseInt(limit));
+      .limit(limit);
 
     res.status(200).json({
       success: true,
@@ -116,64 +126,64 @@ export const getLatestNews = async (req, res, next) => {
 // Function to fetch and store news from external API (run via cron job)
 export const fetchNewsFromExternalApi = async () => {
   try {
-    // This would connect to a real financial news API
-    // For now, we'll create some sample data
+    const apiKey = process.env.ALPHA_VANTAGE_API_KEY;
+    if (!apiKey) throw new Error("ALPHA_VANTAGE_API_KEY is not configured");
 
-    const sampleNewsData = [
-      {
-        title: "Federal Reserve Announces Interest Rate Decision",
-        source: "Financial Times",
-        url: "https://example.com/fed-interest-rate",
-        imageUrl: "https://example.com/images/fed.jpg",
-        summary:
-          "The Federal Reserve announced its latest interest rate decision, impacting markets globally.",
-        categories: ["monetary policy", "economy"],
-        symbols: ["SPY", "QQQ", "DIA"],
-        sentiment: "neutral",
-        publishedAt: new Date(),
+    const response = await axios.get("https://www.alphavantage.co/query", {
+      params: {
+        function: "NEWS_SENTIMENT",
+        topics: "financial_markets,blockchain",
+        sort: "LATEST",
+        limit: 50,
+        apikey: apiKey,
       },
-      {
-        title: "Tech Giant Exceeds Quarterly Earnings Expectations",
-        source: "Wall Street Journal",
-        url: "https://example.com/tech-earnings",
-        imageUrl: "https://example.com/images/tech.jpg",
-        summary:
-          "Major technology company reports earnings well above analyst expectations, driving market optimism.",
-        categories: ["technology", "earnings"],
-        symbols: ["AAPL", "MSFT", "GOOGL"],
-        sentiment: "positive",
-        publishedAt: new Date(Date.now() - 1000 * 60 * 30), // 30 minutes ago
-      },
-      {
-        title: "Oil Prices Fall on Supply Concerns",
-        source: "Bloomberg",
-        url: "https://example.com/oil-prices",
-        imageUrl: "https://example.com/images/oil.jpg",
-        summary:
-          "Crude oil prices declined sharply following reports of increased production and weakening demand.",
-        categories: ["commodities", "energy"],
-        symbols: ["USO", "XLE", "CVX"],
-        sentiment: "negative",
-        publishedAt: new Date(Date.now() - 1000 * 60 * 60), // 1 hour ago
-      },
-    ];
-
-    // Check if news articles already exist
-    const existingNews = await MarketNews.countDocuments();
-
-    if (existingNews === 0) {
-      // Only insert sample data if no news exists
-      await MarketNews.insertMany(sampleNewsData);
-      logger.info("Sample market news data inserted successfully");
+      timeout: 10_000,
+    });
+    const feed = Array.isArray(response.data?.feed) ? response.data.feed : [];
+    if (!feed.length) {
+      const providerMessage = response.data?.Information || response.data?.Note || "No articles returned";
+      throw new Error(`Alpha Vantage news unavailable: ${providerMessage}`);
     }
 
-    // In a real implementation, we would:
-    // 1. Fetch from external API
-    // 2. Process and format the data
-    // 3. Store in the database
-    // 4. Remove old news articles
+    const parsePublishedAt = (value) => {
+      const match = String(value || "").match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$/);
+      return match
+        ? new Date(Date.UTC(+match[1], +match[2] - 1, +match[3], +match[4], +match[5], +match[6]))
+        : new Date();
+    };
+    const sentiment = (label) => {
+      const normalized = String(label || "").toLowerCase();
+      if (normalized.includes("bullish")) return "positive";
+      if (normalized.includes("bearish")) return "negative";
+      return "neutral";
+    };
 
-    return { success: true, message: "News fetch operation completed" };
+    const operations = feed
+      .filter((article) => article?.url && article?.title)
+      .map((article) => ({
+        updateOne: {
+          filter: { url: article.url },
+          update: {
+            $set: {
+              title: article.title,
+              source: article.source || "Market news",
+              url: article.url,
+              imageUrl: article.banner_image || null,
+              summary: article.summary || article.title,
+              categories: (article.topics || []).map((topic) => topic.topic).filter(Boolean),
+              symbols: (article.ticker_sentiment || []).map((ticker) => ticker.ticker).filter(Boolean),
+              sentiment: sentiment(article.overall_sentiment_label),
+              publishedAt: parsePublishedAt(article.time_published),
+            },
+          },
+          upsert: true,
+        },
+      }));
+
+    if (operations.length) await MarketNews.bulkWrite(operations, { ordered: false });
+    await MarketNews.deleteMany({ publishedAt: { $lt: new Date(Date.now() - 45 * 24 * 60 * 60_000) } });
+    logger.info(`Stored ${operations.length} market news articles from Alpha Vantage`);
+    return { success: true, count: operations.length };
   } catch (error) {
     logger.error("Error fetching news from external API:", error);
     throw error;

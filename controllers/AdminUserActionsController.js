@@ -19,6 +19,7 @@ const allowedTransactionTypes = new Set([
   "investment",
   "fee",
   "bonus",
+  "profit",
   "shop_purchase",
   "shop_reward",
   "shop_refund",
@@ -100,7 +101,16 @@ export const adjustUserBalance = async (req, res, next) => {
       status = "completed",
       date,
       allowNegative = false,
+      transactionType,
     } = req.body || {};
+
+    const resolvedType = transactionType || (action === "credit" ? "deposit" : "withdrawal");
+    if (!allowedTransactionTypes.has(resolvedType)) {
+      throw new ApiError("Invalid transaction type", 400, "validation_error");
+    }
+    if (action === "credit" && !["deposit", "bonus", "profit", "shop_reward", "shop_refund"].includes(resolvedType)) {
+      throw new ApiError("Choose a credit transaction type for a balance credit", 400, "validation_error");
+    }
 
     const value = toPositiveNumber(amount);
     const signed = action === "credit" ? value : -value;
@@ -116,7 +126,7 @@ export const adjustUserBalance = async (req, res, next) => {
     const when = toDate(date);
     const transaction = new Transaction({
       user: user._id,
-      type: action === "credit" ? "deposit" : "withdrawal",
+      type: resolvedType,
       amount: value,
       currency: "USD",
       status,
@@ -190,7 +200,7 @@ export const createUserLedgerEntries = async (req, res, next) => {
       const entryAmount = randomBetween(min, max);
       const when = spreadDate(start, end, i, total);
       if (affectBalance) {
-        balanceDelta += ["deposit", "bonus", "shop_reward"].includes(type)
+        balanceDelta += ["deposit", "bonus", "profit", "shop_reward", "shop_refund"].includes(type)
           ? entryAmount
           : -entryAmount;
       }
