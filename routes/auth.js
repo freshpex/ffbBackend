@@ -7,6 +7,9 @@ import mongoose from "mongoose";
 import LoginActivity from "../models/LoginActivity.js";
 import { googleAuth } from "../controllers/authController.js";
 import { initFirebaseAdmin } from "../services/firebaseAdmin.js";
+import crypto from "crypto";
+import { sendEmail } from "../services/emailService.js";
+import { buildBrandedEmailHtml } from "../services/emailTemplates.js";
 
 const router = express.Router();
 
@@ -223,7 +226,21 @@ router.post("/register", async (req, res) => {
 // Login user - Firebase handles authentication, this endpoint validates and returns user data
 router.post("/login", async (req, res) => {
   try {
-    const { uid } = req.body;
+    const { uid, firebaseToken } = req.body;
+
+    if (!uid || !firebaseToken) {
+      return res.status(400).json({ message: "A valid Firebase session is required" });
+    }
+
+    const firebaseAdmin = initFirebaseAdmin();
+    if (!firebaseAdmin?.auth) {
+      return res.status(503).json({ message: "Authentication service is temporarily unavailable" });
+    }
+
+    const decoded = await firebaseAdmin.auth().verifyIdToken(firebaseToken);
+    if (decoded.uid !== uid) {
+      return res.status(401).json({ message: "Firebase session does not match this account" });
+    }
 
     const user = await User.findOne({ uid });
     if (!user) {
@@ -461,9 +478,137 @@ router.post("/sync-password", async (req, res) => {
   }
 });
 
-// Reset password - handled by Firebase, this endpoint is a placeholder
-router.post("/reset-password", (req, res) => {
-  res.status(200).json({ message: "Password reset email sent" });
+const normalizeEmail = (email) => String(email || "").trim().toLowerCase();
+const otpHash = (email, otp) =>
+  crypto
+    .createHash("sha256")
+    .update(`${normalizeEmail(email)}:${otp}:${process.env.JWT_SECRET}`)
+    .digest("hex");
+
+router.post("/forgot-password", async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body?.email);
+    if (!/^\S+@\S+\.\S+$/.test(email)) {
+      return res.status(400).json({ message: "Enter a valid email address" });
+    }
+
+    const user = await User.findOne({ email });
+    const genericMessage = "If an account exists for that email, a verification code has been sent.";
+    if (!user) return res.status(200).json({ message: genericMessage });
+
+    const now = Date.now();
+    if (
+      user.passwordResetOtpLastSentAt &&
+      now - user.passwordResetOtpLastSentAt.getTime() < 60_000
+    ) {
+      return res.status(429).json({ message: "Please wait one minute before requesting another code" });
+    }
+
+    const otp = String(crypto.randomInt(100000, 1000000));
+    user.passwordResetOtpHash = otpHash(email, otp);
+    user.passwordResetOtpExpires = new Date(now + 10 * 60_000);
+    user.passwordResetOtpLastSentAt = new Date(now);
+    user.passwordResetOtpAttempts = 0;
+    user.passwordResetToken = undefined;
+    user.passwordResetExpires = undefined;
+    await user.save();
+
+    const delivery = await sendEmail({
+      to: { email: user.email, name: `${user.firstName || ""} ${user.lastName || ""}`.trim() },
+      subject: "Your FFB password reset code",
+      text: `Your FFB verification code is ${otp}. It expires in 10 minutes. If you did not request this, you can ignore this email.`,
+      html: buildBrandedEmailHtml({
+        title: "Reset your password",
+        message: `Use this verification code to continue:\n\n${otp}\n\nThis code expires in 10 minutes. If you did not request this, you can safely ignore this email.`,
+      }),
+      customId: "password-reset-otp",
+    });
+
+    if (!delivery.ok) {
+      user.passwordResetOtpHash = undefined;
+      user.passwordResetOtpExpires = undefined;
+      await user.save();
+      return res.status(503).json({ message: "We could not send the email right now. Please try again shortly." });
+    }
+
+    return res.status(200).json({ message: genericMessage, expiresInSeconds: 600 });
+  } catch (error) {
+    logger.error("Forgot password error:", error);
+    return res.status(500).json({ message: "Unable to start password reset. Please try again." });
+  }
+});
+
+router.post("/forgot-password/verify", async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body?.email);
+    const otp = String(req.body?.otp || "").trim();
+    const user = await User.findOne({ email });
+    const invalidMessage = "The code is incorrect or has expired. Request a new code and try again.";
+
+    if (!user?.passwordResetOtpHash || !user.passwordResetOtpExpires || user.passwordResetOtpExpires < new Date()) {
+      return res.status(400).json({ message: invalidMessage });
+    }
+    if ((user.passwordResetOtpAttempts || 0) >= 5) {
+      return res.status(429).json({ message: "Too many incorrect attempts. Request a new code." });
+    }
+
+    const supplied = Buffer.from(otpHash(email, otp), "hex");
+    const expected = Buffer.from(user.passwordResetOtpHash, "hex");
+    if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) {
+      user.passwordResetOtpAttempts = (user.passwordResetOtpAttempts || 0) + 1;
+      await user.save();
+      return res.status(400).json({ message: invalidMessage });
+    }
+
+    const resetToken = user.createPasswordResetToken();
+    user.passwordResetExpires = new Date(Date.now() + 15 * 60_000);
+    user.passwordResetOtpHash = undefined;
+    user.passwordResetOtpExpires = undefined;
+    user.passwordResetOtpAttempts = 0;
+    await user.save();
+    return res.status(200).json({ message: "Code verified", resetToken });
+  } catch (error) {
+    logger.error("Password reset verification error:", error);
+    return res.status(500).json({ message: "Unable to verify the code. Please try again." });
+  }
+});
+
+router.post("/reset-password", async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body?.email);
+    const resetToken = String(req.body?.resetToken || "");
+    const newPassword = String(req.body?.newPassword || "");
+    if (newPassword.length < 8 || !/[a-z]/.test(newPassword) || !/[A-Z]/.test(newPassword) || !/\d/.test(newPassword)) {
+      return res.status(400).json({ message: "Password must be at least 8 characters and include uppercase, lowercase, and a number" });
+    }
+
+    const tokenHash = crypto.createHash("sha256").update(resetToken).digest("hex");
+    const user = await User.findOne({
+      email,
+      passwordResetToken: tokenHash,
+      passwordResetExpires: { $gt: new Date() },
+    });
+    if (!user) {
+      return res.status(400).json({ message: "This reset session is invalid or has expired. Start again." });
+    }
+
+    const firebaseAdmin = initFirebaseAdmin();
+    if (!firebaseAdmin?.auth || !user.uid) {
+      return res.status(503).json({ message: "Password service is temporarily unavailable. Please try again shortly." });
+    }
+    await firebaseAdmin.auth().updateUser(user.uid, { password: newPassword });
+
+    user.password = newPassword;
+    user.passwordResetToken = undefined;
+    user.passwordResetExpires = undefined;
+    user.passwordResetOtpLastSentAt = undefined;
+    await user.save();
+
+    return res.status(200).json({ message: "Your password has been changed. You can now sign in." });
+  } catch (error) {
+    logger.error("Reset password error:", error);
+    return res.status(500).json({ message: "Unable to reset your password. Please try again." });
+  }
 });
 
 router.post("/google-auth", googleAuth);

@@ -16,6 +16,7 @@ const transactionSchema = new mongoose.Schema(
         "investment",
         "fee",
         "bonus",
+        "profit",
         // shop-related transaction types
         "shop_purchase",
         "shop_reward",
