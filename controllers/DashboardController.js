@@ -17,7 +17,7 @@ export const getAccountSummary = async (req, res, next) => {
     }
 
     // Calculate total balance
-    const totalBalance = user.balance;
+    const totalBalance = Number(user.balance ?? 0);
 
     // Calculate total investments value
     const investments = await Investment.find({
@@ -71,8 +71,8 @@ export const getAccountSummary = async (req, res, next) => {
 
     // Format data for response
     const accountSummary = {
-      availableBalance: user.balance || "N/A",
-      bonusBalance: user.bonusBalance || 0,
+      availableBalance: totalBalance,
+      bonusBalance: Number(user.bonusBalance ?? 0),
       totalInvestments,
       totalAssets: totalBalance + totalInvestments,
       projectedEarnings,
@@ -441,7 +441,10 @@ export const getDashboardOverview = async (req, res, next) => {
       (async () => {
         // Get investments count and total
         const investments = await Investment.find({ user: userId });
-        const investmentTotal = investments.reduce(
+        const activeInvestments = investments.filter(
+          (investment) => investment.status === "active",
+        );
+        const totalInvestments = activeInvestments.reduce(
           (sum, inv) => sum + inv.amount,
           0,
         );
@@ -465,14 +468,19 @@ export const getDashboardOverview = async (req, res, next) => {
         );
 
         return {
-          balance: user.balance || 0,
-          investmentCount: investments.length,
-          investmentTotal,
-          depositTotal,
-          withdrawalTotal,
-          lastLogin: user.lastLoginAt,
-          accountStatus: user.status,
-          kycVerified: user.kycVerified,
+          availableBalance: Number(user.balance ?? 0),
+          bonusBalance: Number(user.bonusBalance ?? 0),
+          totalInvestments,
+          totalAssets: Number(user.balance ?? 0) + totalInvestments,
+          projectedEarnings: activeInvestments.reduce((sum, investment) => {
+            const roi = Number(investment.returnRate ?? 0) / 100;
+            return sum + Number(investment.amount ?? 0) * roi;
+          }, 0),
+          totalDeposits: depositTotal,
+          totalWithdrawals: withdrawalTotal,
+          currency: "USD",
+          accountNumber: user.accountNumber || "N/A",
+          accountType: user.accountType || "Standard",
         };
       })(),
 

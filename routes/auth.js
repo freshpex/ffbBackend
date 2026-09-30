@@ -237,7 +237,13 @@ router.post("/login", async (req, res) => {
       return res.status(503).json({ message: "Authentication service is temporarily unavailable" });
     }
 
-    const decoded = await firebaseAdmin.auth().verifyIdToken(firebaseToken);
+    let decoded;
+    try {
+      decoded = await firebaseAdmin.auth().verifyIdToken(firebaseToken);
+    } catch (error) {
+      logger.warn(`Firebase token verification failed during login: ${error.code || error.message}`);
+      return res.status(401).json({ message: "Your Firebase session is invalid or expired. Please sign in again." });
+    }
     if (decoded.uid !== uid) {
       return res.status(401).json({ message: "Firebase session does not match this account" });
     }
